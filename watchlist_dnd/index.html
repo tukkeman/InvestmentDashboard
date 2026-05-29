@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}
+body{background:transparent;overflow:hidden;padding:4px 0;}
+.item{display:flex;align-items:center;gap:8px;padding:7px 10px;margin-bottom:4px;
+      background:#1a1f2e;border-radius:6px;border:1px solid transparent;transition:border-color .12s;}
+.item:hover{border-color:#2a3050;}
+.item.active{border-color:rgba(0,212,170,.4);}
+.handle{color:#555;cursor:grab;font-size:14px;flex-shrink:0;line-height:1;user-select:none;}
+.handle:active{cursor:grabbing;}
+.name{flex:1;font-size:13px;font-weight:600;color:#e0e0e0;cursor:pointer;
+      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;user-select:none;}
+.item.active .name{color:#00d4aa;}
+.name:hover{color:#00d4aa;}
+.rm{color:#555;cursor:pointer;font-size:11px;padding:2px 6px;border-radius:3px;flex-shrink:0;user-select:none;}
+.rm:hover{color:#ef5350;background:rgba(239,83,80,.15);}
+.sortable-ghost{opacity:.25;}
+.sortable-chosen{background:#252d3d!important;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="./Sortable.min.js"></script>
+<script>
+var root = document.getElementById("root");
+var sortable = null;
+var _actionId = 0;
+
+function send(value) {
+    _actionId++;
+    window.parent.postMessage({isStreamlitMessage:true, type:"streamlit:setComponentValue", value:Object.assign({_id:_actionId}, value), dataType:"json"}, "*");
+}
+
+function setHeight() {
+    window.parent.postMessage({isStreamlitMessage:true, type:"streamlit:setFrameHeight", height:root.scrollHeight + 8}, "*");
+}
+
+function render(tickers, selected) {
+    root.innerHTML = "";
+    tickers.forEach(function(t) {
+        var d = document.createElement("div");
+        d.className = "item" + (t === selected ? " active" : "");
+        d.dataset.ticker = t;
+        d.innerHTML =
+            '<span class="handle">&#x28BF;</span>' +
+            '<span class="name">' + t + '</span>' +
+            '<span class="rm">&#x2715;</span>';
+        root.appendChild(d);
+    });
+
+    if (sortable) sortable.destroy();
+    sortable = Sortable.create(root, {
+        animation: 150,
+        handle: ".handle",
+        ghostClass: "sortable-ghost",
+        chosenClass: "sortable-chosen",
+        onEnd: function() {
+            var order = Array.from(root.children).map(function(c){return c.dataset.ticker;});
+            send({action:"order", order:order});
+        }
+    });
+
+    setHeight();
+}
+
+root.addEventListener("click", function(e) {
+    var item = e.target.closest(".item");
+    if (!item) return;
+    var order = Array.from(root.children).map(function(c){return c.dataset.ticker;});
+    if (e.target.classList.contains("rm")) {
+        var newOrder = order.filter(function(t){return t !== item.dataset.ticker;});
+        send({action:"remove", ticker:item.dataset.ticker, order:newOrder});
+    } else if (e.target.classList.contains("name")) {
+        send({action:"select", ticker:item.dataset.ticker, order:order});
+    }
+});
+
+window.addEventListener("message", function(event) {
+    if (event.data.type === "streamlit:render") {
+        var args = event.data.args;
+        render(args.tickers || [], args.selected || "");
+        if (args.goto_analysis) {
+            var tabs = window.parent.document.querySelectorAll('[data-baseweb="tab"]');
+            if (tabs.length > 1) tabs[1].click();
+        }
+    }
+});
+
+window.parent.postMessage({isStreamlitMessage:true, type:"streamlit:componentReady", apiVersion:1}, "*");
+</script>
+</body>
+</html>
