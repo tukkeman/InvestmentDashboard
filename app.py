@@ -334,6 +334,29 @@ with tab_analysis:
     df = add_all_indicators(df)
     signals = get_signals(df)
     last = df.iloc[-1]
+    prev = df.iloc[-2] if len(df) >= 2 else last
+
+    # ── Latest price header ──────────────────────────────────────────────────
+    price = last["Close"]
+    chg = price - prev["Close"]
+    chg_pct = chg / prev["Close"] * 100 if prev["Close"] else 0
+    price_color = "#26a69a" if chg >= 0 else "#ef5350"
+    chg_arrow = "▲" if chg >= 0 else "▼"
+    price_date = df.index[-1].strftime("%d %b %Y")
+    currency = "THB" if (is_thai or scbam_fetcher.is_scbam_fund(ticker) or ticker.upper().endswith(".BK")) else "USD"
+    st.markdown(
+        f"""<div style="padding:10px 4px 4px 2px">
+          <div style="font-size:0.78em;color:#888;letter-spacing:.06em;margin-bottom:2px">{ticker} · {price_date}</div>
+          <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
+            <span style="font-size:2.2em;font-weight:800;color:#e0e0e0">{price:,.4f}</span>
+            <span style="font-size:0.82em;color:#aaa">{currency}</span>
+            <span style="font-size:1.1em;font-weight:600;color:{price_color}">
+              {chg_arrow} {abs(chg):.4f} ({abs(chg_pct):.2f}%)
+            </span>
+          </div>
+        </div>""",
+        unsafe_allow_html=True,
+    )
 
     # ── Signal cards ────────────────────────────────────────────────────────
     s1, s2, s3, s4 = st.columns(4)
