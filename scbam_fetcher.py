@@ -38,6 +38,30 @@ def _be_to_ce(be: str) -> str:
     return f"{int(y) - 543}-{m}-{d}"
 
 
+_FUND_ID_CACHE: dict[str, str] = {}
+
+def _get_fund_id(fund_name: str) -> str | None:
+    """Return the checkbox ID for a fund by scraping the filter section of the page."""
+    if fund_name in _FUND_ID_CACHE:
+        return _FUND_ID_CACHE[fund_name]
+    try:
+        session = _get_session()
+        r = session.get("https://www.scbam.com/th/fund/nav-historical/", timeout=15)
+        escaped = re.escape(fund_name)
+        # Column header structure: <span class="newFont">FUND</span> ... value="ID"
+        m = re.search(
+            rf'<span class="newFont">{escaped}</span>.*?value="(\d+)"',
+            r.text,
+            re.DOTALL,
+        )
+        if m:
+            _FUND_ID_CACHE[fund_name] = m.group(1)
+            return m.group(1)
+    except Exception:
+        pass
+    return None
+
+
 def fetch_nav(fund_name: str, days: int = 365) -> list[dict]:
     """
     Fetch NAV history for a named SCBAM fund.
@@ -55,9 +79,16 @@ def fetch_nav(fund_name: str, days: int = 365) -> list[dict]:
 
     try:
         session = _get_session()
+        # Include the fund's checkbox ID so SCBAM returns it in the data rows.
+        # Without this, SCBAM omits the fund from the table and the regex can
+        # accidentally match a neighbouring fund's NAV column.
+        fund_id = _get_fund_id(fund_name)
+        post_data = {"start": _to_be(start_ce), "end": _to_be(end_ce)}
+        if fund_id:
+            post_data[f"checkbox{fund_id}"] = "on"
         r = session.post(
             "https://www.scbam.com/th/fund/nav-historical/",
-            data={"start": _to_be(start_ce), "end": _to_be(end_ce)},
+            data=post_data,
             headers={
                 "Referer": "https://www.scbam.com/th/fund/nav-historical/",
                 "Content-Type": "application/x-www-form-urlencoded",
@@ -73,9 +104,10 @@ def fetch_nav(fund_name: str, days: int = 365) -> list[dict]:
     # Escape special chars in fund name for regex (handles parentheses)
     fund_escaped = re.escape(fund_name)
 
-    # Find all fund column blocks: <h6>FUND</h6>...<p style="...padding-right...">NAV</p>
+    # Match only within the fund's own column div — stop before the next column starts
+    # so a missing NAV never bleeds into a neighbouring fund's value.
     nav_blocks = re.finditer(
-        rf'<h6>{fund_escaped}</h6>.*?<p[^>]*padding-right[^>]*>\s*(?:<img[^>]*>\s*)?([0-9]+\.[0-9]+)',
+        rf'<h6>{fund_escaped}</h6>(?:(?!<div class="column).)*?<p[^>]*padding-right[^>]*>\s*(?:<img[^>]*>\s*)?([0-9]+\.[0-9]+)',
         html,
         re.DOTALL,
     )
@@ -94,7 +126,17 @@ def fetch_nav(fund_name: str, days: int = 365) -> list[dict]:
     seen = {}
     for rec in results:
         seen[rec["date"]] = rec["nav"]
-    return [{"date": d, "nav": v} for d, v in sorted(seen.items())]
+    records = [{"date": d, "nav": v} for d, v in sorted(seen.items())]
+
+    # Drop entries where the single-day change exceeds 30% (parse artifact, not real)
+    filtered = []
+    for rec in records:
+        if filtered:
+            prev_nav = filtered[-1]["nav"]
+            if prev_nav and abs(rec["nav"] - prev_nav) / prev_nav > 0.30:
+                continue
+        filtered.append(rec)
+    return filtered
 
 
 def is_scbam_fund(fund_name: str) -> bool:
