@@ -11,11 +11,16 @@
   ],
   "groups": {
     "SMH": "Semiconductor",
-    "SCBSEMI(A)": "Semiconductor"
+    "SCBSEMI(A)": "Semiconductor",
+    "BCHN.L": "Blockchain",
+    "SCBBLOC(A)": "Blockchain",
+    "^KS11": "Korea",
+    "SCBKEQTG": "Korea",
+    "SCBAXJ(A)": "Korea"
   },
   "group_names": [
-    "Blockchain",
     "Semiconductor",
-    "Crypto"
+    "Blockchain",
+    "Korea"
   ]
 }
