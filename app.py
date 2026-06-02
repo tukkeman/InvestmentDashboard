@@ -18,6 +18,10 @@ _WL_DND = components.declare_component(
     "watchlist_dnd",
     path=os.path.join(os.path.dirname(__file__), "watchlist_dnd"),
 )
+_CTX_MENU = components.declare_component(
+    "context_menu",
+    path=os.path.join(os.path.dirname(__file__), "context_menu"),
+)
 
 
 def _auto_fetch_scbam(ticker: str) -> bool:
@@ -127,6 +131,10 @@ if "dnd_last_id" not in st.session_state:
     st.session_state.dnd_last_id = ""
 if "ticker_groups" not in st.session_state:
     st.session_state.ticker_groups, st.session_state.group_names = load_watchlist_groups()
+if "ctx_last_id" not in st.session_state:
+    st.session_state.ctx_last_id = ""
+if "grp_dnd_last_id" not in st.session_state:
+    st.session_state.grp_dnd_last_id = ""
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -151,8 +159,9 @@ with st.sidebar:
                 st.session_state.selected = t
                 st.rerun()
 
-    # Unified drag / click-to-select / ✕-remove component
-    _h = max(len(st.session_state.tickers) * 50 + 12, 50)
+    # Unified drag / click-to-select / ✕-remove / group component
+    _n_groups = len({v for v in st.session_state.ticker_groups.values() if v})
+    _h = max(len(st.session_state.tickers) * 48 + _n_groups * 28 + 20, 50)
     _goto = st.session_state.goto_analysis
     if _goto:
         st.session_state.goto_analysis = False  # reset before next rerun
@@ -160,6 +169,8 @@ with st.sidebar:
         tickers=st.session_state.tickers,
         selected=st.session_state.selected,
         goto_analysis=_goto,
+        groups=st.session_state.ticker_groups,
+        group_names=st.session_state.group_names,
         default=None,
         key="wl_dnd",
         height=_h,
@@ -169,8 +180,6 @@ with st.sidebar:
         _action = wl_result.get("action")
         _order  = wl_result.get("order", st.session_state.tickers)
         _ticker = wl_result.get("ticker", "")
-        # Skip stale events — the widget state persists across reruns, so we
-        # only process each action once using a per-message ID counter.
         if _id != st.session_state.dnd_last_id:
             st.session_state.dnd_last_id = _id
             if _action == "order" and _order != st.session_state.tickers:
@@ -187,6 +196,67 @@ with st.sidebar:
                 if st.session_state.selected == _ticker:
                     st.session_state.selected = _order[0] if _order else ""
                 st.rerun()
+            elif _action == "assign_group":
+                _t = wl_result.get("ticker", "")
+                _g = wl_result.get("group")
+                if _t in st.session_state.tickers:
+                    if _g:
+                        st.session_state.ticker_groups[_t] = _g
+                    else:
+                        st.session_state.ticker_groups.pop(_t, None)
+                    save_watchlist(st.session_state.tickers)
+                    st.rerun()
+
+    # ── Group management ─────────────────────────────────────────────────────
+    if st.session_state.group_names:
+        st.caption("Right-click a fund to assign its group.")
+    with st.expander("⚙️ Groups"):
+        with st.form("add_group_form", clear_on_submit=True):
+            _gi_col, _gb_col = st.columns([3, 1])
+            with _gi_col:
+                _new_grp = st.text_input("grp_input", placeholder="New group name…", label_visibility="collapsed")
+            with _gb_col:
+                _grp_submitted = st.form_submit_button("＋", type="primary", use_container_width=True)
+            if _grp_submitted and _new_grp.strip():
+                _gn = _new_grp.strip()
+                if _gn not in st.session_state.group_names:
+                    st.session_state.group_names.append(_gn)
+                    save_watchlist(st.session_state.tickers)
+                    st.rerun()
+
+        if st.session_state.group_names:
+            st.caption("Drag to reorder · ✕ to delete")
+            _gh = max(len(st.session_state.group_names) * 48 + 12, 50)
+            grp_result = _WL_DND(
+                tickers=st.session_state.group_names,
+                selected="",
+                goto_analysis=False,
+                groups={},
+                group_names=[],
+                default=None,
+                key="groups_dnd",
+                height=_gh,
+            )
+            if grp_result:
+                _gid = grp_result.get("_id")
+                if _gid != st.session_state.grp_dnd_last_id:
+                    st.session_state.grp_dnd_last_id = _gid
+                    _gaction = grp_result.get("action")
+                    _gorder  = grp_result.get("order", st.session_state.group_names)
+                    _gname   = grp_result.get("ticker", "")
+                    if _gaction == "order" and _gorder != st.session_state.group_names:
+                        st.session_state.group_names = _gorder
+                        save_watchlist(st.session_state.tickers)
+                        st.rerun()
+                    elif _gaction == "remove" and _gname in st.session_state.group_names:
+                        st.session_state.group_names = [g for g in _gorder if g != _gname]
+                        for _t in list(st.session_state.ticker_groups):
+                            if st.session_state.ticker_groups[_t] == _gname:
+                                del st.session_state.ticker_groups[_t]
+                        save_watchlist(st.session_state.tickers)
+                        st.rerun()
+        else:
+            st.caption("No groups yet.")
 
     st.divider()
     if st.button("🔄 Refresh Data", use_container_width=True):
@@ -205,6 +275,28 @@ with st.sidebar:
 if not st.session_state.tickers:
     st.info("Add a ticker in the sidebar to get started.")
     st.stop()
+
+# ── Right-click context menu (invisible, handles Overview fund rows) ──────────
+ctx_result = _CTX_MENU(
+    group_names=st.session_state.group_names,
+    key="ctx_menu",
+    default=None,
+    height=0,
+)
+if ctx_result:
+    _cid = ctx_result.get("_id")
+    if _cid != st.session_state.ctx_last_id:
+        st.session_state.ctx_last_id = _cid
+        if ctx_result.get("action") == "assign_group":
+            _ct = ctx_result.get("ticker", "")
+            _cg = ctx_result.get("group")
+            if _ct in st.session_state.tickers:
+                if _cg:
+                    st.session_state.ticker_groups[_ct] = _cg
+                else:
+                    st.session_state.ticker_groups.pop(_ct, None)
+                save_watchlist(st.session_state.tickers)
+                st.rerun()
 
 tab_overview, tab_analysis, tab_news = st.tabs(["📊 Overview", "📉 Technical Analysis", "📰 News"])
 
@@ -236,51 +328,22 @@ with tab_overview:
 
         st.divider()
 
-        # ── Group management ─────────────────────────────────────────────────
-        UNGROUPED = "— Ungrouped"
-        group_options = [UNGROUPED] + st.session_state.group_names
-
-        with st.expander("⚙️ Manage Groups"):
-            col_gi, col_gb = st.columns([3, 1])
-            with col_gi:
-                new_group_input = st.text_input(
-                    "new_group", placeholder="New group name…", label_visibility="collapsed"
-                )
-            with col_gb:
-                if st.button("＋ Add", use_container_width=True, key="add_group_btn") and new_group_input.strip():
-                    g = new_group_input.strip()
-                    if g not in st.session_state.group_names:
-                        st.session_state.group_names.append(g)
-                        save_watchlist(st.session_state.tickers)
-                        st.rerun()
-            if st.session_state.group_names:
-                st.markdown("**Groups** — click to delete:")
-                btn_cols = st.columns(min(len(st.session_state.group_names), 4))
-                for gi, gname in enumerate(list(st.session_state.group_names)):
-                    with btn_cols[gi % len(btn_cols)]:
-                        if st.button(f"✕ {gname}", key=f"del_grp_{gname}", use_container_width=True):
-                            st.session_state.group_names.remove(gname)
-                            for t in list(st.session_state.ticker_groups):
-                                if st.session_state.ticker_groups[t] == gname:
-                                    del st.session_state.ticker_groups[t]
-                            save_watchlist(st.session_state.tickers)
-                            st.rerun()
-            else:
-                st.caption("No groups yet. Type a name above and click ＋ Add.")
-
         # ── Build grouped rows ────────────────────────────────────────────────
+        UNGROUPED = "— Ungrouped"
         grouped_rows: dict = defaultdict(list)
         for row_i, row in summary_df.iterrows():
             g = st.session_state.ticker_groups.get(row.get("ticker", ""), UNGROUPED)
-            if g not in group_options:
+            if g not in st.session_state.group_names:
                 g = UNGROUPED
             grouped_rows[g].append((row_i, row))
 
         display_order = [g for g in st.session_state.group_names if g in grouped_rows]
         if UNGROUPED in grouped_rows:
             display_order.append(UNGROUPED)
-
         show_headers = bool(st.session_state.group_names)
+
+        if show_headers:
+            st.caption("Right-click any fund row to assign its group.")
 
         # ── Compact fund list — CSS targets the container via :has() sentinel ─
         st.markdown("""
@@ -346,14 +409,12 @@ with tab_overview:
                     sig_label = sig["label"]
                     sig_color = sig["color"]
 
-                    current_group = st.session_state.ticker_groups.get(row["ticker"], UNGROUPED)
-
-                    if show_headers:
-                        c1, c2, c3, c4, c5, c6, c7 = st.columns([1.5, 2.0, 1.3, 1.0, 1.4, 1.5, 1.5])
-                    else:
-                        c1, c2, c3, c4, c5, c6 = st.columns([1.5, 2.5, 1.5, 1.2, 1.5, 1.8])
-
+                    c1, c2, c3, c4, c5, c6 = st.columns([1.5, 2.5, 1.5, 1.2, 1.5, 1.8])
                     with c1:
+                        st.markdown(
+                            f'<div class="fund-row-marker" data-ticker="{row["ticker"]}" style="display:none"></div>',
+                            unsafe_allow_html=True,
+                        )
                         if st.button(row["ticker"], key=f"goto_{row_i}"):
                             st.session_state.selected = row["ticker"]
                             st.session_state.goto_analysis = True
@@ -377,22 +438,6 @@ with tab_overview:
                             f"border-radius:10px;padding:2px 8px;font-size:0.72em;font-weight:600'>{sig_label}</span>",
                             unsafe_allow_html=True,
                         )
-                    if show_headers:
-                        with c7:
-                            new_g = st.selectbox(
-                                "group",
-                                group_options,
-                                index=group_options.index(current_group) if current_group in group_options else 0,
-                                key=f"grp_{row['ticker']}",
-                                label_visibility="collapsed",
-                            )
-                            if new_g != current_group:
-                                if new_g == UNGROUPED:
-                                    st.session_state.ticker_groups.pop(row["ticker"], None)
-                                else:
-                                    st.session_state.ticker_groups[row["ticker"]] = new_g
-                                save_watchlist(st.session_state.tickers)
-                                st.rerun()
 
                     st.markdown("<hr style='border:none;border-top:1px solid #2a3050'>", unsafe_allow_html=True)
 

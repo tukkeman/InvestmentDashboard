@@ -9,9 +9,12 @@
     "SCBAXJ(A)",
     "POLY.BK"
   ],
-  "groups": {},
+  "groups": {
+    "SMH": "Semiconductor",
+    "SCBSEMI(A)": "Semiconductor"
+  },
   "group_names": [
-    "Thai Funds",
-    "US ETFs"
+    "Semiconductor",
+    "Blockchain"
   ]
 }

@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>*{margin:0;padding:0;}body{background:transparent;overflow:hidden;}</style>
+</head>
+<body>
+<script>
+var _actionId = 0;
+var groupNames = [];
+var currentCallback = null;
+var menu = null;
+
+function send(action, ticker, group) {
+    _actionId++;
+    window.parent.postMessage({
+        isStreamlitMessage: true,
+        type: "streamlit:setComponentValue",
+        value: {_id: _actionId, action: action, ticker: ticker, group: group},
+        dataType: "json"
+    }, "*");
+}
+
+function initMenu() {
+    if (window.parent.__invCtxMenuEl) {
+        menu = window.parent.__invCtxMenuEl;
+        return;
+    }
+    menu = window.parent.document.createElement("div");
+    menu.id = "inv-ctx-menu";
+    var s = menu.style;
+    s.display = "none"; s.position = "fixed"; s.zIndex = "999999";
+    s.background = "#1a1f2e"; s.border = "1px solid #2a3050"; s.borderRadius = "6px";
+    s.padding = "4px 0"; s.minWidth = "160px";
+    s.boxShadow = "0 4px 20px rgba(0,0,0,.65)";
+    s.fontFamily = "-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif";
+    s.userSelect = "none";
+    window.parent.document.body.appendChild(menu);
+    window.parent.__invCtxMenuEl = menu;
+
+    menu.addEventListener("mouseover", function(e) {
+        var it = e.target.closest && e.target.closest(".cm-opt");
+        if (it) it.style.background = "#252d3d";
+    });
+    menu.addEventListener("mouseout", function(e) {
+        var it = e.target.closest && e.target.closest(".cm-opt");
+        if (it) it.style.background = "";
+    });
+    menu.addEventListener("click", function(e) {
+        e.stopPropagation();
+        var it = e.target.closest && e.target.closest(".cm-opt");
+        if (!it) return;
+        var idx = parseInt(it.getAttribute("data-idx"), 10);
+        var group = idx < 0 ? null : groupNames[idx];
+        if (currentCallback) currentCallback(group);
+        hideMenu();
+    });
+    window.parent.document.addEventListener("click", function() { hideMenu(); }, true);
+    window.parent.document.addEventListener("keydown", function(e) {
+        if (e.key === "Escape") hideMenu();
+    });
+
+    window.parent.__invContextMenu = {
+        show: showMenu,
+        hide: hideMenu,
+        setGroups: function(names) { groupNames = names || []; }
+    };
+}
+
+function buildMenu() {
+    while (menu.firstChild) menu.removeChild(menu.firstChild);
+    var doc = window.parent.document;
+    var hdr = doc.createElement("div");
+    hdr.style.cssText = "padding:3px 14px 6px;font-size:0.68em;color:#888;letter-spacing:.08em;font-weight:700;text-transform:uppercase";
+    hdr.textContent = "Assign Group";
+    menu.appendChild(hdr);
+    groupNames.forEach(function(g, i) {
+        var d = doc.createElement("div");
+        d.className = "cm-opt";
+        d.setAttribute("data-idx", String(i));
+        d.style.cssText = "padding:7px 16px;font-size:0.84em;color:#e0e0e0;cursor:pointer";
+        d.textContent = g;
+        menu.appendChild(d);
+    });
+    var sep = doc.createElement("div");
+    sep.style.cssText = "border-top:1px solid #2a3050;margin:4px 0";
+    menu.appendChild(sep);
+    var rm = doc.createElement("div");
+    rm.className = "cm-opt";
+    rm.setAttribute("data-idx", "-1");
+    rm.style.cssText = "padding:7px 16px;font-size:0.84em;color:#888;cursor:pointer";
+    rm.textContent = "Remove from group";
+    menu.appendChild(rm);
+}
+
+function showMenu(x, y, ticker, groups, callback) {
+    if (!menu || !groupNames.length) return;
+    if (groups) groupNames = groups;
+    currentCallback = callback || null;
+    buildMenu();
+    menu.style.display = "block";
+    var vw = window.parent.innerWidth, vh = window.parent.innerHeight;
+    var mw = menu.offsetWidth || 170, mh = menu.offsetHeight || 160;
+    menu.style.left = Math.min(x, vw - mw - 8) + "px";
+    menu.style.top = Math.min(y, vh - mh - 8) + "px";
+}
+
+function hideMenu() {
+    if (menu) menu.style.display = "none";
+    currentCallback = null;
+}
+
+function onContextMenu(e) {
+    if (!groupNames.length) return;
+    var row = e.target.closest && e.target.closest('[data-testid="stHorizontalBlock"]');
+    if (!row) return;
+    var marker = row.querySelector(".fund-row-marker");
+    if (!marker) return;
+    var ticker = marker.getAttribute("data-ticker");
+    if (!ticker) return;
+    e.preventDefault();
+    e.stopPropagation();
+    showMenu(e.clientX, e.clientY, ticker, null, function(group) {
+        send("assign_group", ticker, group);
+    });
+}
+
+function setup() {
+    initMenu();
+    window.parent.document.removeEventListener("contextmenu", onContextMenu, true);
+    window.parent.document.addEventListener("contextmenu", onContextMenu, true);
+    window.parent.postMessage({isStreamlitMessage:true, type:"streamlit:setFrameHeight", height:0}, "*");
+}
+
+window.addEventListener("message", function(e) {
+    if (!e.data || e.data.type !== "streamlit:render") return;
+    groupNames = (e.data.args && e.data.args.group_names) || [];
+    if (window.parent.__invContextMenu) window.parent.__invContextMenu.setGroups(groupNames);
+    setup();
+});
+
+window.parent.postMessage({isStreamlitMessage:true, type:"streamlit:componentReady", apiVersion:1}, "*");
+</script>
+</body>
+</html>
