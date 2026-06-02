@@ -356,8 +356,6 @@ with tab_overview:
             display_order.append(UNGROUPED)
         show_headers = bool(st.session_state.group_names)
 
-        if show_headers:
-            st.caption("Right-click any fund row to assign its group.")
 
         # ── Compact fund list — CSS targets the container via :has() sentinel ─
         st.markdown("""
