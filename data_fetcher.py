@@ -119,6 +119,18 @@ def _safe_float(info: dict, key: str) -> float | None:
         return None
 
 
+def _safe_row(row, key: str) -> float | None:
+    import math
+    try:
+        v = row[key]
+        if v is None:
+            return None
+        f = float(v)
+        return None if (math.isnan(f) or math.isinf(f)) else f
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 @st.cache_data(ttl=300)
 def fetch_ticker_fundamentals(ticker: str) -> dict:
     """Return fundamental data for a ticker as a flat dict.
@@ -150,6 +162,60 @@ def fetch_ticker_fundamentals(ticker: str) -> dict:
                 if len(closes) >= 2:
                     ref_idx = max(0, len(closes) - 252)
                     base["change_52w_pct"] = (closes.iloc[-1] / closes.iloc[ref_idx] - 1) * 100
+        except Exception:
+            pass
+        return base
+
+    # ── Thai SET stock (.BK) branch — use thaifin for fundamentals ───────────
+    if ticker.upper().endswith('.BK'):
+        symbol = ticker.upper().replace('.BK', '')
+        # Profile: still use yfinance (name, sector, industry, country)
+        try:
+            info = yf.Ticker(ticker).info or {}
+        except Exception:
+            info = {}
+        base['quote_type'] = info.get('quoteType', 'EQUITY')
+        base['name'] = info.get('shortName') or info.get('longName') or ticker
+        base['currency'] = info.get('currency', 'THB') or 'THB'
+        base['country'] = info.get('country', 'Thailand') or 'Thailand'
+        base['sector'] = info.get('sector', '—') or '—'
+        base['industry'] = info.get('industry', '—') or '—'
+        base['long_summary'] = info.get('longBusinessSummary', '') or ''
+        base['beta'] = _safe_float(info, 'beta')
+        raw_52w = _safe_float(info, 'fiftyTwoWeekChangePercent') or _safe_float(info, '52WeekChange')
+        if raw_52w is not None:
+            base['change_52w_pct'] = raw_52w * 100 if abs(raw_52w) <= 10 else raw_52w
+        mktcap = _safe_float(info, 'marketCap')
+        if mktcap:
+            base['aum_or_mktcap'] = mktcap
+            base['aum_label'] = 'Market Cap'
+            base['aum_fmt'] = _fmt_aum(mktcap)
+        # Fundamentals: thaifin (latest fiscal year row)
+        try:
+            from thaifin import Stock as ThaiStock
+            df_y = ThaiStock(symbol).yearly_dataframe
+            if not df_y.empty:
+                row = df_y.iloc[-1]
+                base['trailing_pe']    = _safe_row(row, 'price_earning_ratio')
+                base['price_to_book']  = _safe_row(row, 'price_book_value')
+                base['eps']            = _safe_row(row, 'earning_per_share')
+                dv = _safe_row(row, 'dividend_yield')
+                if dv is not None:
+                    base['div_yield_pct'] = dv  # thaifin returns as % already
+                # Dividend rate = yield% / 100 * close price
+                close = _safe_row(row, 'close')
+                if dv is not None and close:
+                    base['div_rate'] = round(dv / 100 * close, 4)
+                # Payout ratio = div_per_share / EPS * 100
+                if base['div_rate'] and base['eps'] and base['eps'] > 0:
+                    base['payout_ratio'] = round(base['div_rate'] / base['eps'] * 100, 2)
+                # Supplement mkt_cap from thaifin if yfinance didn't have it
+                if base['aum_or_mktcap'] is None:
+                    mktcap_t = _safe_row(row, 'mkt_cap')
+                    if mktcap_t:
+                        base['aum_or_mktcap'] = mktcap_t
+                        base['aum_label'] = 'Market Cap'
+                        base['aum_fmt'] = _fmt_aum(mktcap_t)
         except Exception:
             pass
         return base
