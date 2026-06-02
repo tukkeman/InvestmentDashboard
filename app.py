@@ -6,6 +6,7 @@ import pandas as pd
 import json
 import os
 from datetime import datetime
+from collections import defaultdict
 
 from data_fetcher import fetch_price_data, fetch_watchlist_summary, fetch_ticker_signal
 from technical_analysis import add_all_indicators, get_signals, get_recommendation
@@ -100,9 +101,20 @@ def load_watchlist() -> list[str]:
             return data.get("tickers", [])
     return ["SPY", "QQQ"]
 
+def load_watchlist_groups() -> tuple[dict, list]:
+    if os.path.exists(WATCHLIST_FILE):
+        with open(WATCHLIST_FILE) as f:
+            data = json.load(f)
+            return data.get("groups", {}), data.get("group_names", [])
+    return {}, []
+
 def save_watchlist(tickers: list[str]):
     with open(WATCHLIST_FILE, "w") as f:
-        json.dump({"tickers": tickers}, f, indent=2)
+        json.dump({
+            "tickers": tickers,
+            "groups": st.session_state.get("ticker_groups", {}),
+            "group_names": st.session_state.get("group_names", []),
+        }, f, indent=2)
 
 # ── Session state ─────────────────────────────────────────────────────────────
 if "tickers" not in st.session_state:
@@ -113,6 +125,8 @@ if "goto_analysis" not in st.session_state:
     st.session_state.goto_analysis = False
 if "dnd_last_id" not in st.session_state:
     st.session_state.dnd_last_id = ""
+if "ticker_groups" not in st.session_state:
+    st.session_state.ticker_groups, st.session_state.group_names = load_watchlist_groups()
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -222,84 +236,165 @@ with tab_overview:
 
         st.divider()
 
-        # Compact fund list — CSS targets the container via :has() sentinel
+        # ── Group management ─────────────────────────────────────────────────
+        UNGROUPED = "— Ungrouped"
+        group_options = [UNGROUPED] + st.session_state.group_names
+
+        with st.expander("⚙️ Manage Groups"):
+            col_gi, col_gb = st.columns([3, 1])
+            with col_gi:
+                new_group_input = st.text_input(
+                    "new_group", placeholder="New group name…", label_visibility="collapsed"
+                )
+            with col_gb:
+                if st.button("＋ Add", use_container_width=True, key="add_group_btn") and new_group_input.strip():
+                    g = new_group_input.strip()
+                    if g not in st.session_state.group_names:
+                        st.session_state.group_names.append(g)
+                        save_watchlist(st.session_state.tickers)
+                        st.rerun()
+            if st.session_state.group_names:
+                st.markdown("**Groups** — click to delete:")
+                btn_cols = st.columns(min(len(st.session_state.group_names), 4))
+                for gi, gname in enumerate(list(st.session_state.group_names)):
+                    with btn_cols[gi % len(btn_cols)]:
+                        if st.button(f"✕ {gname}", key=f"del_grp_{gname}", use_container_width=True):
+                            st.session_state.group_names.remove(gname)
+                            for t in list(st.session_state.ticker_groups):
+                                if st.session_state.ticker_groups[t] == gname:
+                                    del st.session_state.ticker_groups[t]
+                            save_watchlist(st.session_state.tickers)
+                            st.rerun()
+            else:
+                st.caption("No groups yet. Type a name above and click ＋ Add.")
+
+        # ── Build grouped rows ────────────────────────────────────────────────
+        grouped_rows: dict = defaultdict(list)
+        for row_i, row in summary_df.iterrows():
+            g = st.session_state.ticker_groups.get(row.get("ticker", ""), UNGROUPED)
+            if g not in group_options:
+                g = UNGROUPED
+            grouped_rows[g].append((row_i, row))
+
+        display_order = [g for g in st.session_state.group_names if g in grouped_rows]
+        if UNGROUPED in grouped_rows:
+            display_order.append(UNGROUPED)
+
+        show_headers = bool(st.session_state.group_names)
+
+        # ── Compact fund list — CSS targets the container via :has() sentinel ─
         st.markdown("""
 <style>
 [data-testid="stVerticalBlock"]:has(.ov-list){gap:.15rem!important}
 [data-testid="stVerticalBlock"]:has(.ov-list) [data-testid="stHorizontalBlock"]{align-items:center}
-[data-testid="stVerticalBlock"]:has(.ov-list) [data-testid="stBaseButton-secondary"]{padding:2px 8px!important;min-height:0!important;height:auto!important;line-height:1.5!important;font-size:0.82em!important;font-weight:700!important}
+[data-testid="stVerticalBlock"]:has(.ov-list) [data-testid="stBaseButton-secondary"]{padding:2px 8px!important;min-height:0!important;height:auto!important;line-height:1.5!important;font-size:0.82em!important;font-weight:700!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important}
 [data-testid="stVerticalBlock"]:has(.ov-list) hr{margin:0!important}
 </style>
 <div class="ov-list"></div>""", unsafe_allow_html=True)
 
         with st.container():
-            for row_i, row in summary_df.iterrows():
-                if "error" in row and pd.notna(row.get("error")):
-                    ticker_name = row["ticker"]
-                    with st.expander(f"⚠️ {ticker_name} — data unavailable"):
-                        if "(" in ticker_name:
-                            st.caption(
-                                f"**{ticker_name}** — NAV data not yet loaded.  \n"
-                                "Go to the **Technical Analysis** tab to trigger an automatic fetch from scbam.com."
-                            )
-                        else:
-                            st.caption(
-                                f"Could not load data for **{ticker_name}**. "
-                                "Click 🔄 Refresh Data in the sidebar and try again. "
-                                "If the problem persists, verify the ticker on finance.yahoo.com."
-                            )
-                    continue
+            for group_name in display_order:
+                rows_in_group = grouped_rows[group_name]
 
-                chg = row.get("change_pct", 0)
-                price = row.get("price", 0)
-                chg_color = "#26a69a" if chg >= 0 else "#ef5350"
-                chg_arrow = "▲" if chg >= 0 else "▼"
-                currency = row.get("currency", "")
-
-                high = row.get("high_52w", 0)
-                low = row.get("low_52w", 0)
-                if high and low and high != low:
-                    pct_in_range = min(max((price - low) / (high - low) * 100, 0), 100)
-                    range_html = (
-                        f"<div style='font-size:0.72em;color:#888;line-height:1.2'>{low:.2f} – {high:.2f}</div>"
-                        f"<div style='background:#333;border-radius:2px;height:3px;margin-top:2px'>"
-                        f"<div style='background:{chg_color};height:3px;width:{pct_in_range:.0f}%;border-radius:2px'></div>"
-                        f"</div>"
-                    )
-                else:
-                    range_html = "<span style='font-size:0.72em;color:#888'>52W N/A</span>"
-
-                sig = fetch_ticker_signal(row["ticker"])
-                sig_label = sig["label"]
-                sig_color = sig["color"]
-
-                c1, c2, c3, c4, c5, c6 = st.columns([1.5, 2.5, 1.5, 1.2, 1.5, 1.8])
-                with c1:
-                    if st.button(row["ticker"], key=f"goto_{row_i}"):
-                        st.session_state.selected = row["ticker"]
-                        st.session_state.goto_analysis = True
-                        st.rerun()
-                with c2:
-                    label = row.get('name', row['ticker'])
-                    cur_tag = f" <span style='color:#888;font-size:0.8em'>{currency}</span>" if currency else ""
-                    st.markdown(f"<span style='font-size:0.88em'>{label}{cur_tag}</span>", unsafe_allow_html=True)
-                with c3:
-                    st.markdown(f"**{price:,.4f}**")
-                with c4:
+                if show_headers:
                     st.markdown(
-                        f"<span style='color:{chg_color};font-weight:700'>{chg_arrow} {abs(chg):.2f}%</span>",
-                        unsafe_allow_html=True,
-                    )
-                with c5:
-                    st.markdown(range_html, unsafe_allow_html=True)
-                with c6:
-                    st.markdown(
-                        f"<span style='background:{sig_color}22;color:{sig_color};border:1px solid {sig_color}44;"
-                        f"border-radius:10px;padding:2px 8px;font-size:0.72em;font-weight:600'>{sig_label}</span>",
+                        f"<div style='padding:6px 0 4px 0;margin-top:6px;border-bottom:1px solid #2a3050'>"
+                        f"<span style='font-weight:700;font-size:0.9em;color:#e0e0e0'>{group_name}</span>"
+                        f"<span style='font-size:0.75em;color:#888;margin-left:8px'>"
+                        f"{len(rows_in_group)} fund{'s' if len(rows_in_group) != 1 else ''}</span>"
+                        f"</div>",
                         unsafe_allow_html=True,
                     )
 
-                st.markdown("<hr style='border:none;border-top:1px solid #2a3050'>", unsafe_allow_html=True)
+                for row_i, row in rows_in_group:
+                    if "error" in row and pd.notna(row.get("error")):
+                        ticker_name = row["ticker"]
+                        with st.expander(f"⚠️ {ticker_name} — data unavailable"):
+                            if "(" in ticker_name:
+                                st.caption(
+                                    f"**{ticker_name}** — NAV data not yet loaded.  \n"
+                                    "Go to the **Technical Analysis** tab to trigger an automatic fetch from scbam.com."
+                                )
+                            else:
+                                st.caption(
+                                    f"Could not load data for **{ticker_name}**. "
+                                    "Click 🔄 Refresh Data in the sidebar and try again. "
+                                    "If the problem persists, verify the ticker on finance.yahoo.com."
+                                )
+                        continue
+
+                    chg = row.get("change_pct", 0)
+                    price = row.get("price", 0)
+                    chg_color = "#26a69a" if chg >= 0 else "#ef5350"
+                    chg_arrow = "▲" if chg >= 0 else "▼"
+                    currency = row.get("currency", "")
+
+                    high = row.get("high_52w", 0)
+                    low = row.get("low_52w", 0)
+                    if high and low and high != low:
+                        pct_in_range = min(max((price - low) / (high - low) * 100, 0), 100)
+                        range_html = (
+                            f"<div style='font-size:0.72em;color:#888;line-height:1.2'>{low:.2f} – {high:.2f}</div>"
+                            f"<div style='background:#333;border-radius:2px;height:3px;margin-top:2px'>"
+                            f"<div style='background:{chg_color};height:3px;width:{pct_in_range:.0f}%;border-radius:2px'></div>"
+                            f"</div>"
+                        )
+                    else:
+                        range_html = "<span style='font-size:0.72em;color:#888'>52W N/A</span>"
+
+                    sig = fetch_ticker_signal(row["ticker"])
+                    sig_label = sig["label"]
+                    sig_color = sig["color"]
+
+                    current_group = st.session_state.ticker_groups.get(row["ticker"], UNGROUPED)
+
+                    if show_headers:
+                        c1, c2, c3, c4, c5, c6, c7 = st.columns([1.5, 2.0, 1.3, 1.0, 1.4, 1.5, 1.5])
+                    else:
+                        c1, c2, c3, c4, c5, c6 = st.columns([1.5, 2.5, 1.5, 1.2, 1.5, 1.8])
+
+                    with c1:
+                        if st.button(row["ticker"], key=f"goto_{row_i}"):
+                            st.session_state.selected = row["ticker"]
+                            st.session_state.goto_analysis = True
+                            st.rerun()
+                    with c2:
+                        label = row.get('name', row['ticker'])
+                        cur_tag = f" <span style='color:#888;font-size:0.8em'>{currency}</span>" if currency else ""
+                        st.markdown(f"<span style='font-size:0.88em'>{label}{cur_tag}</span>", unsafe_allow_html=True)
+                    with c3:
+                        st.markdown(f"**{price:,.4f}**")
+                    with c4:
+                        st.markdown(
+                            f"<span style='color:{chg_color};font-weight:700'>{chg_arrow} {abs(chg):.2f}%</span>",
+                            unsafe_allow_html=True,
+                        )
+                    with c5:
+                        st.markdown(range_html, unsafe_allow_html=True)
+                    with c6:
+                        st.markdown(
+                            f"<span style='background:{sig_color}22;color:{sig_color};border:1px solid {sig_color}44;"
+                            f"border-radius:10px;padding:2px 8px;font-size:0.72em;font-weight:600'>{sig_label}</span>",
+                            unsafe_allow_html=True,
+                        )
+                    if show_headers:
+                        with c7:
+                            new_g = st.selectbox(
+                                "group",
+                                group_options,
+                                index=group_options.index(current_group) if current_group in group_options else 0,
+                                key=f"grp_{row['ticker']}",
+                                label_visibility="collapsed",
+                            )
+                            if new_g != current_group:
+                                if new_g == UNGROUPED:
+                                    st.session_state.ticker_groups.pop(row["ticker"], None)
+                                else:
+                                    st.session_state.ticker_groups[row["ticker"]] = new_g
+                                save_watchlist(st.session_state.tickers)
+                                st.rerun()
+
+                    st.markdown("<hr style='border:none;border-top:1px solid #2a3050'>", unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TAB 2 — TECHNICAL ANALYSIS
