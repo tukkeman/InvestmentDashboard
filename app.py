@@ -726,17 +726,15 @@ with tab_fundamentals:
         "Showing NAV-derived metrics only.</div>"
     ) if _f["is_thai_fund"] else ""
     st.markdown(
-        f"""<div style="background:#1a1f2e;border-radius:10px;padding:18px 22px;
-            border-left:4px solid {_type_color};margin-bottom:16px">
-          <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
-            <span style="font-size:1.3em;font-weight:700;color:#e0e0e0">{_f['name']}</span>
-            <span style="background:{_type_color}22;color:{_type_color};border:1px solid {_type_color}44;
-                border-radius:8px;padding:1px 8px;font-size:0.72em;font-weight:700">{_f['quote_type']}</span>
-            <span style="font-size:0.8em;color:#888">{_f['currency']}{_incep}</span>
-          </div>
-          <div style="font-size:0.82em;color:#aaa;margin-top:5px">{_meta_str}</div>
-          {_thai_warn}
-        </div>""",
+        f'<div style="background:#1a1f2e;border-radius:10px;padding:18px 22px;border-left:4px solid {_type_color};margin-bottom:16px">'
+        f'<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">'
+        f'<span style="font-size:1.3em;font-weight:700;color:#e0e0e0">{_f["name"]}</span>'
+        f'<span style="background:{_type_color}22;color:{_type_color};border:1px solid {_type_color}44;border-radius:8px;padding:1px 8px;font-size:0.72em;font-weight:700">{_f["quote_type"]}</span>'
+        f'<span style="font-size:0.8em;color:#888">{_f["currency"]}{_incep}</span>'
+        f'</div>'
+        f'<div style="font-size:0.82em;color:#aaa;margin-top:5px">{_meta_str}</div>'
+        f'{_thai_warn}'
+        f'</div>',
         unsafe_allow_html=True,
     )
 
