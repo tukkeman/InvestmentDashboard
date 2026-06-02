@@ -3,6 +3,7 @@ import pandas as pd
 import streamlit as st
 import numpy as np
 import thai_fund
+from technical_analysis import add_all_indicators, get_signals, get_recommendation
 
 
 def _flatten(df: pd.DataFrame) -> pd.DataFrame:
@@ -69,6 +70,18 @@ def fetch_ticker_summary(ticker: str) -> dict:
     if summary:
         return summary
     return {"ticker": ticker, "error": "No data"}
+
+
+@st.cache_data(ttl=300)
+def fetch_ticker_signal(ticker: str) -> dict:
+    """Return overall TA signal for a ticker (label, color, score)."""
+    df = fetch_price_data(ticker, "6mo")
+    if df.empty or len(df) < 26:
+        return {"label": "N/A", "color": "#888", "score": 0}
+    df = add_all_indicators(df)
+    signals = get_signals(df)
+    rec = get_recommendation(signals)
+    return {"label": rec["label"], "color": rec["color"], "score": rec["score"]}
 
 
 def fetch_watchlist_summary(tickers: list) -> pd.DataFrame:

@@ -7,7 +7,7 @@ import json
 import os
 from datetime import datetime
 
-from data_fetcher import fetch_price_data, fetch_watchlist_summary
+from data_fetcher import fetch_price_data, fetch_watchlist_summary, fetch_ticker_signal
 from technical_analysis import add_all_indicators, get_signals, get_recommendation
 from news_fetcher import fetch_news, fetch_all_news
 import thai_fund
@@ -269,7 +269,11 @@ with tab_overview:
                 else:
                     range_html = "<span style='font-size:0.72em;color:#888'>52W N/A</span>"
 
-                c1, c2, c3, c4, c5 = st.columns([1.5, 3, 1.5, 1.5, 2])
+                sig = fetch_ticker_signal(row["ticker"])
+                sig_label = sig["label"]
+                sig_color = sig["color"]
+
+                c1, c2, c3, c4, c5, c6 = st.columns([1.5, 2.5, 1.5, 1.2, 1.5, 1.8])
                 with c1:
                     if st.button(row["ticker"], key=f"goto_{row_i}"):
                         st.session_state.selected = row["ticker"]
@@ -288,6 +292,12 @@ with tab_overview:
                     )
                 with c5:
                     st.markdown(range_html, unsafe_allow_html=True)
+                with c6:
+                    st.markdown(
+                        f"<span style='background:{sig_color}22;color:{sig_color};border:1px solid {sig_color}44;"
+                        f"border-radius:10px;padding:2px 8px;font-size:0.72em;font-weight:600'>{sig_label}</span>",
+                        unsafe_allow_html=True,
+                    )
 
                 st.markdown("<hr style='border:none;border-top:1px solid #2a3050'>", unsafe_allow_html=True)
 
