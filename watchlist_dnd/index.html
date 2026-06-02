@@ -17,6 +17,8 @@ body{background:transparent;overflow:hidden;padding:4px 0;}
 .name:hover{color:#00d4aa;}
 .rm{color:#555;cursor:pointer;font-size:11px;padding:2px 6px;border-radius:3px;flex-shrink:0;user-select:none;}
 .rm:hover{color:#ef5350;background:rgba(239,83,80,.15);}
+.grp-btn{color:#555;cursor:pointer;font-size:13px;padding:2px 5px;border-radius:3px;flex-shrink:0;user-select:none;line-height:1;}
+.grp-btn:hover{color:#00d4aa;background:rgba(0,212,170,.15);}
 .sortable-ghost{opacity:.25;}
 .sortable-chosen{background:#252d3d!important;}
 .group-header{padding:10px 10px 3px;font-size:0.7em;font-weight:700;color:#aaa;
@@ -46,9 +48,13 @@ function makeItem(t, selected) {
     var d = document.createElement("div");
     d.className = "item" + (t === selected ? " active" : "");
     d.dataset.ticker = t;
+    var grpBtn = _groupNames.length > 0
+        ? '<span class="grp-btn" title="Assign group">&#x22EE;</span>'
+        : '';
     d.innerHTML =
         '<span class="handle">&#x28BF;</span>' +
         '<span class="name">' + t + '</span>' +
+        grpBtn +
         '<span class="rm">&#x2715;</span>';
     return d;
 }
@@ -117,6 +123,27 @@ root.addEventListener("click", function(e) {
     if (e.target.classList.contains("rm")) {
         var newOrder = order.filter(function(t) { return t !== item.dataset.ticker; });
         send({action:"remove", ticker:item.dataset.ticker, order:newOrder});
+    } else if (e.target.classList.contains("grp-btn")) {
+        var cm = window.parent.__invContextMenu;
+        if (!cm || !_groupNames.length) return;
+        var btnRect = e.target.getBoundingClientRect();
+        var iframeRect = {left:0, top:0};
+        try {
+            var iframes = window.parent.document.querySelectorAll("iframe");
+            for (var i = 0; i < iframes.length; i++) {
+                if (iframes[i].contentWindow === window) {
+                    iframeRect = iframes[i].getBoundingClientRect();
+                    break;
+                }
+            }
+        } catch(err) {}
+        var ticker = item.dataset.ticker;
+        cm.show(
+            btnRect.left + iframeRect.left,
+            btnRect.bottom + iframeRect.top + 2,
+            ticker, _groupNames,
+            function(group) { send({action:"assign_group", ticker:ticker, group:group}); }
+        );
     } else if (e.target.classList.contains("name")) {
         send({action:"select", ticker:item.dataset.ticker, order:order});
     }
