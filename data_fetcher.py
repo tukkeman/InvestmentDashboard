@@ -2,7 +2,9 @@ import yfinance as yf
 import pandas as pd
 import streamlit as st
 import numpy as np
+from datetime import datetime
 import thai_fund
+import scbam_fetcher
 from technical_analysis import add_all_indicators, get_signals, get_recommendation
 
 
@@ -90,3 +92,136 @@ def fetch_watchlist_summary(tickers: list) -> pd.DataFrame:
         data = fetch_ticker_summary(ticker)
         rows.append(data)
     return pd.DataFrame(rows)
+
+
+def _fmt_aum(v: float) -> str:
+    if v is None:
+        return "—"
+    if v >= 1e9:
+        return f"${v/1e9:.2f} B"
+    if v >= 1e6:
+        return f"${v/1e6:.2f} M"
+    return f"${v:,.0f}"
+
+
+def _ts_to_date(v) -> str:
+    try:
+        return datetime.fromtimestamp(int(v)).strftime("%d %b %Y")
+    except Exception:
+        return "—"
+
+
+def _safe_float(info: dict, key: str) -> float | None:
+    v = info.get(key)
+    try:
+        return float(v) if v is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+@st.cache_data(ttl=300)
+def fetch_ticker_fundamentals(ticker: str) -> dict:
+    """Return fundamental data for a ticker as a flat dict.
+    Numeric fields are float | None (None = unavailable).
+    String fields fall back to '—'.
+    """
+    base = {
+        "ticker": ticker, "name": ticker, "quote_type": "UNKNOWN", "currency": "—",
+        "fund_family": "—", "inception_date": "—", "category": "—",
+        "sector": "—", "industry": "—", "country": "—", "long_summary": "",
+        "trailing_pe": None, "forward_pe": None, "price_to_book": None, "eps": None,
+        "div_yield_pct": None, "div_rate": None, "payout_ratio": None, "ex_div_date": "—",
+        "aum_or_mktcap": None, "aum_label": "—", "aum_fmt": "—",
+        "beta": None, "expense_ratio": None, "change_52w_pct": None,
+        "is_thai_fund": False,
+    }
+
+    # ── SCBAM / Thai mutual fund branch ──────────────────────────────────────
+    if scbam_fetcher.is_scbam_fund(ticker):
+        base["is_thai_fund"] = True
+        base["fund_family"] = "SCBAM"
+        base["category"] = "Thai Mutual Fund"
+        base["currency"] = "THB"
+        try:
+            df = thai_fund.get_df(ticker)
+            if not df.empty:
+                base["name"] = ticker
+                closes = df["Close"].dropna()
+                if len(closes) >= 2:
+                    ref_idx = max(0, len(closes) - 252)
+                    base["change_52w_pct"] = (closes.iloc[-1] / closes.iloc[ref_idx] - 1) * 100
+        except Exception:
+            pass
+        return base
+
+    # ── yfinance branch ───────────────────────────────────────────────────────
+    try:
+        info = yf.Ticker(ticker).info or {}
+    except Exception:
+        return base
+
+    qt = info.get("quoteType", "UNKNOWN")
+    base["quote_type"] = qt
+    base["name"] = info.get("shortName") or info.get("longName") or ticker
+    base["currency"] = info.get("currency", "—") or "—"
+    base["country"] = info.get("country", "—") or "—"
+    base["sector"] = info.get("sector", "—") or "—"
+    base["industry"] = info.get("industry", "—") or "—"
+    base["long_summary"] = info.get("longBusinessSummary", "") or ""
+
+    # Fund-specific fields
+    if info.get("fundFamily"):
+        base["fund_family"] = info["fundFamily"]
+    if info.get("fundInceptionDate"):
+        base["inception_date"] = _ts_to_date(info["fundInceptionDate"])
+    if info.get("category"):
+        base["category"] = info["category"]
+
+    # 52W change
+    raw_52w = _safe_float(info, "fiftyTwoWeekChangePercent") or _safe_float(info, "52WeekChange")
+    if raw_52w is not None:
+        # yfinance returns as decimal fraction (e.g. 0.217 = 21.7%)
+        base["change_52w_pct"] = raw_52w * 100 if abs(raw_52w) <= 10 else raw_52w
+
+    # INDEX assets have almost no fundamentals — return early
+    if qt == "INDEX":
+        return base
+
+    # Valuation
+    base["trailing_pe"] = _safe_float(info, "trailingPE")
+    base["forward_pe"] = _safe_float(info, "forwardPE")
+    base["price_to_book"] = _safe_float(info, "priceToBook")
+    base["eps"] = _safe_float(info, "epsTrailingTwelveMonths") or _safe_float(info, "trailingEps")
+
+    # Dividends
+    if qt == "ETF":
+        raw_yield = _safe_float(info, "yield")
+        if raw_yield is not None:
+            base["div_yield_pct"] = raw_yield * 100 if raw_yield < 1.0 else raw_yield
+        base["div_rate"] = _safe_float(info, "trailingAnnualDividendRate")
+        base["beta"] = _safe_float(info, "beta3Year")
+        aum = _safe_float(info, "netAssets") or _safe_float(info, "totalAssets")
+        if aum:
+            base["aum_or_mktcap"] = aum
+            base["aum_label"] = "AUM"
+            base["aum_fmt"] = _fmt_aum(aum)
+        exp = _safe_float(info, "netExpenseRatio") or _safe_float(info, "annualReportExpenseRatio")
+        if exp is not None:
+            base["expense_ratio"] = exp * 100 if exp < 1.0 else exp
+    else:
+        raw_yield = _safe_float(info, "dividendYield")
+        if raw_yield is not None:
+            base["div_yield_pct"] = raw_yield * 100 if raw_yield < 1.0 else raw_yield
+        base["div_rate"] = _safe_float(info, "dividendRate") or _safe_float(info, "trailingAnnualDividendRate")
+        base["beta"] = _safe_float(info, "beta")
+        mktcap = _safe_float(info, "marketCap")
+        if mktcap:
+            base["aum_or_mktcap"] = mktcap
+            base["aum_label"] = "Market Cap"
+            base["aum_fmt"] = _fmt_aum(mktcap)
+
+    base["payout_ratio"] = _safe_float(info, "payoutRatio")
+    if info.get("exDividendDate"):
+        base["ex_div_date"] = _ts_to_date(info["exDividendDate"])
+
+    return base

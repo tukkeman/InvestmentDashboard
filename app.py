@@ -8,7 +8,7 @@ import os
 from datetime import datetime
 from collections import defaultdict
 
-from data_fetcher import fetch_price_data, fetch_watchlist_summary, fetch_ticker_signal
+from data_fetcher import fetch_price_data, fetch_watchlist_summary, fetch_ticker_signal, fetch_ticker_fundamentals
 from technical_analysis import add_all_indicators, get_signals, get_recommendation
 from news_fetcher import fetch_news, fetch_all_news
 import thai_fund
@@ -92,6 +92,13 @@ st.markdown("""
     border-left: 3px solid #00d4aa;
 }
 .stTabs [data-baseweb="tab-list"] { gap: 8px; }
+.fund-metric-mini {
+    background: #1a1f2e;
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin-bottom: 8px;
+    border-left: 2px solid #2a3050;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -303,7 +310,9 @@ if ctx_result:
                 save_watchlist(st.session_state.tickers)
                 st.rerun()
 
-tab_overview, tab_analysis, tab_news = st.tabs(["📊 Overview", "📉 Technical Analysis", "📰 News"])
+tab_overview, tab_analysis, tab_fundamentals, tab_news = st.tabs(
+    ["📊 Overview", "📉 Technical Analysis", "📋 Fundamentals", "📰 News"]
+)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TAB 1 — OVERVIEW
@@ -685,7 +694,164 @@ with tab_analysis:
         st.dataframe(df[cols_present].tail(50).iloc[::-1].round(4), width="stretch")
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# TAB 3 — NEWS
+# TAB 3 — FUNDAMENTALS
+# ═══════════════════════════════════════════════════════════════════════════════
+with tab_fundamentals:
+    st.subheader("Fundamental Analysis")
+
+    col_fund_f, _ = st.columns([3, 1])
+    with col_fund_f:
+        _fidx = st.session_state.tickers.index(st.session_state.selected) if st.session_state.selected in st.session_state.tickers else 0
+        _fticker = st.selectbox("Fund", st.session_state.tickers, index=_fidx, key="fa_ticker", label_visibility="collapsed")
+        if _fticker != st.session_state.selected:
+            st.session_state.selected = _fticker
+            st.rerun()
+
+    with st.spinner(f"Loading fundamentals for {_fticker}…"):
+        _f = fetch_ticker_fundamentals(_fticker)
+
+    # ── Profile card ──────────────────────────────────────────────────────────
+    _type_color = {"ETF": "#7c83fd", "EQUITY": "#00d4aa", "INDEX": "#ffa726"}.get(_f["quote_type"], "#888")
+    _meta_parts = []
+    if _f["fund_family"] != "—": _meta_parts.append(_f["fund_family"])
+    if _f["category"] != "—": _meta_parts.append(_f["category"])
+    if _f["sector"] != "—": _meta_parts.append(_f["sector"])
+    if _f["industry"] != "—": _meta_parts.append(_f["industry"])
+    if _f["country"] != "—": _meta_parts.append(_f["country"])
+    _meta_str = " · ".join(_meta_parts) if _meta_parts else "—"
+    _incep = f" · Since {_f['inception_date']}" if _f["inception_date"] != "—" else ""
+    _thai_warn = (
+        "<div style='font-size:0.78em;color:#ffa726;margin-top:8px'>"
+        "⚠ Fundamental data not available for Thai open-end mutual funds via Yahoo Finance. "
+        "Showing NAV-derived metrics only.</div>"
+    ) if _f["is_thai_fund"] else ""
+    st.markdown(
+        f"""<div style="background:#1a1f2e;border-radius:10px;padding:18px 22px;
+            border-left:4px solid {_type_color};margin-bottom:16px">
+          <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+            <span style="font-size:1.3em;font-weight:700;color:#e0e0e0">{_f['name']}</span>
+            <span style="background:{_type_color}22;color:{_type_color};border:1px solid {_type_color}44;
+                border-radius:8px;padding:1px 8px;font-size:0.72em;font-weight:700">{_f['quote_type']}</span>
+            <span style="font-size:0.8em;color:#888">{_f['currency']}{_incep}</span>
+          </div>
+          <div style="font-size:0.82em;color:#aaa;margin-top:5px">{_meta_str}</div>
+          {_thai_warn}
+        </div>""",
+        unsafe_allow_html=True,
+    )
+
+    if _f["long_summary"]:
+        with st.expander("About this fund / company"):
+            st.caption(_f["long_summary"])
+
+    # ── Metric groups ─────────────────────────────────────────────────────────
+    def _mini(label: str, value, fmt: str = "", suffix: str = "", color: str = "#e0e0e0") -> str:
+        if value is None:
+            disp, clr = "—", "#555"
+        else:
+            try:
+                disp = f"{value:{fmt}}{suffix}" if fmt else f"{value}{suffix}"
+            except Exception:
+                disp, clr = str(value), "#e0e0e0"
+            clr = color
+        return (
+            f'<div class="fund-metric-mini">'
+            f'<div style="font-size:0.72em;color:#888;margin-bottom:2px">{label}</div>'
+            f'<div style="font-size:1.05em;font-weight:600;color:{clr}">{disp}</div>'
+            f'</div>'
+        )
+
+    def _mini_str(label: str, value: str) -> str:
+        clr = "#555" if (not value or value == "—") else "#e0e0e0"
+        return (
+            f'<div class="fund-metric-mini">'
+            f'<div style="font-size:0.72em;color:#888;margin-bottom:2px">{label}</div>'
+            f'<div style="font-size:1.05em;font-weight:600;color:{clr}">{value or "—"}</div>'
+            f'</div>'
+        )
+
+    if _f["is_thai_fund"]:
+        _chg52 = _f["change_52w_pct"]
+        _chg_color = "#26a69a" if (_chg52 or 0) >= 0 else "#ef5350"
+        _chg_arrow = "▲" if (_chg52 or 0) >= 0 else "▼"
+        st.info("Valuation, dividend, and size metrics are not available for Thai open-end mutual funds. Showing NAV performance only.")
+        _pc1, _pc2 = st.columns(2)
+        with _pc1:
+            st.markdown(
+                _mini("52W Change", _chg52, ".2f", "%", _chg_color),
+                unsafe_allow_html=True,
+            )
+        with _pc2:
+            st.markdown(_mini_str("Currency", _f["currency"]), unsafe_allow_html=True)
+    else:
+        _chg52 = _f["change_52w_pct"]
+        _chg_color = "#26a69a" if (_chg52 or 0) >= 0 else "#ef5350"
+
+        _mc1, _mc2, _mc3 = st.columns(3)
+        with _mc1:
+            st.markdown("**Valuation**")
+            st.markdown(
+                _mini("P/E (Trailing)", _f["trailing_pe"], ".2f") +
+                _mini("P/E (Forward)", _f["forward_pe"], ".2f") +
+                _mini("Price / Book", _f["price_to_book"], ".2f") +
+                _mini("EPS", _f["eps"], ".4f"),
+                unsafe_allow_html=True,
+            )
+        with _mc2:
+            st.markdown("**Dividends**")
+            st.markdown(
+                _mini("Yield %", _f["div_yield_pct"], ".2f", "%") +
+                _mini("Annual Rate", _f["div_rate"], ".4f", f" {_f['currency']}") +
+                _mini("Payout Ratio", _f["payout_ratio"], ".1f", "%") +
+                _mini_str("Ex-Dividend Date", _f["ex_div_date"]),
+                unsafe_allow_html=True,
+            )
+        with _mc3:
+            st.markdown("**Fund / Size**")
+            st.markdown(
+                _mini_str(_f["aum_label"], _f["aum_fmt"]) +
+                _mini("Beta", _f["beta"], ".2f") +
+                _mini("Expense Ratio", _f["expense_ratio"], ".2f", "%") +
+                _mini("52W Change", _chg52, ".2f", "%", _chg_color),
+                unsafe_allow_html=True,
+            )
+
+    # ── Watchlist comparison table ────────────────────────────────────────────
+    st.divider()
+    st.subheader("Watchlist Comparison")
+    with st.spinner("Building comparison table…"):
+        _cmp_rows = []
+        for _ct in st.session_state.tickers:
+            _cf = fetch_ticker_fundamentals(_ct)
+            _cmp_rows.append({
+                "Ticker":        _ct,
+                "Name":          _cf["name"],
+                "Type":          _cf["quote_type"],
+                "P/E":           _cf["trailing_pe"],
+                "Div Yield %":   _cf["div_yield_pct"],
+                "Beta":          _cf["beta"],
+                "AUM / Mkt Cap": _cf["aum_or_mktcap"],
+                "52W Chg %":     _cf["change_52w_pct"],
+            })
+    _cmp_df = pd.DataFrame(_cmp_rows)
+    st.dataframe(
+        _cmp_df,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Ticker":        st.column_config.TextColumn("Ticker", width="small"),
+            "Name":          st.column_config.TextColumn("Name"),
+            "Type":          st.column_config.TextColumn("Type", width="small"),
+            "P/E":           st.column_config.NumberColumn("P/E", format="%.1f"),
+            "Div Yield %":   st.column_config.NumberColumn("Div Yield %", format="%.2f"),
+            "Beta":          st.column_config.NumberColumn("Beta", format="%.2f"),
+            "AUM / Mkt Cap": st.column_config.NumberColumn("AUM / Mkt Cap", format="$%.0f"),
+            "52W Chg %":     st.column_config.NumberColumn("52W Chg %", format="%.1f"),
+        },
+    )
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TAB 4 — NEWS
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_news:
     st.subheader("Market News")
