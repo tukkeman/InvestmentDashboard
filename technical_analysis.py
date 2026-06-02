@@ -54,6 +54,63 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def detect_macd_divergence(df: pd.DataFrame, lookback: int = 40) -> tuple:
+    """Detect bullish or bearish MACD divergence in the last `lookback` bars.
+    Returns (type, score): type = 'bullish' | 'bearish' | None, score = +1 | -1 | 0.
+    """
+    if len(df) < lookback + 5 or "MACD" not in df.columns:
+        return None, 0
+    prices = df["Close"].values[-lookback:]
+    macds  = df["MACD"].values[-lookback:]
+    win = 5
+
+    troughs = [i for i in range(win, len(prices) - win)
+               if prices[i] == min(prices[i - win:i + win + 1])]
+    if len(troughs) >= 2:
+        t1, t2 = troughs[-2], troughs[-1]
+        if prices[t2] < prices[t1] and macds[t2] > macds[t1]:
+            return "bullish", 1.0
+
+    peaks = [i for i in range(win, len(prices) - win)
+             if prices[i] == max(prices[i - win:i + win + 1])]
+    if len(peaks) >= 2:
+        p1, p2 = peaks[-2], peaks[-1]
+        if prices[p2] > prices[p1] and macds[p2] < macds[p1]:
+            return "bearish", -1.0
+
+    return None, 0
+
+
+def get_macd_detail(df: pd.DataFrame) -> dict:
+    """Return all 4 MACD components as a flat dict for display and signal scoring."""
+    if len(df) < 3 or "MACD" not in df.columns:
+        return {}
+    last, prev, prev2 = df.iloc[-1], df.iloc[-2], df.iloc[-3]
+    macd  = float(last["MACD"]);        sig   = float(last["MACD_Signal"]);  hist  = float(last["MACD_Hist"])
+    p_mac = float(prev["MACD"]);        p_sig = float(prev["MACD_Signal"]);  p_his = float(prev["MACD_Hist"])
+    pp_his = float(prev2["MACD_Hist"])
+
+    crossed_up   = macd > sig  and p_mac <= p_sig
+    crossed_down = macd < sig  and p_mac >= p_sig
+
+    div_type, div_score = detect_macd_divergence(df)
+
+    return {
+        "macd_value":        round(macd, 4),
+        "signal_value":      round(sig,  4),
+        "hist_value":        round(hist, 4),
+        "above_signal":      macd > sig,
+        "crossed_up":        crossed_up,
+        "crossed_down":      crossed_down,
+        "above_zero":        macd > 0,
+        "hist_increasing":   hist > p_his,
+        "hist_accelerating": hist > p_his > pp_his,
+        "hist_decelerating": hist < p_his < pp_his,
+        "divergence":        div_type,
+        "div_score":         div_score,
+    }
+
+
 def get_signals(df: pd.DataFrame) -> dict:
     if df.empty:
         return {}
@@ -69,9 +126,22 @@ def get_signals(df: pd.DataFrame) -> dict:
     else:
         rsi_signal = ("Neutral", "#ffa726")
 
-    macd = last.get("MACD", 0)
-    sig = last.get("MACD_Signal", 0)
-    macd_signal = ("Bullish", "#26a69a") if macd > sig else ("Bearish", "#ef5350")
+    _md = get_macd_detail(df)
+    if _md:
+        _s  = (1 if _md["above_signal"] else -1)
+        _s += (1 if _md["above_zero"]   else -1)
+        _s += (0.5 if _md["hist_increasing"] else -0.5)
+        _s += _md["div_score"]
+        if   _s >= 2.5:  _ml, _mc = "Strong Bull", "#00c853"
+        elif _s >= 1.0:  _ml, _mc = "Bullish",     "#26a69a"
+        elif _s >= -0.5: _ml, _mc = "Neutral",     "#888888"
+        elif _s >= -2.0: _ml, _mc = "Bearish",     "#ef5350"
+        else:            _ml, _mc = "Strong Bear",  "#b71c1c"
+        macd = _md["macd_value"]
+        macd_signal = (_ml, _mc)
+    else:
+        macd = float(last.get("MACD", 0))
+        macd_signal = ("Neutral", "#888888")
 
     price = last.get("Close", 0)
     sma20 = last.get("SMA_20", np.nan)
@@ -90,7 +160,7 @@ def get_signals(df: pd.DataFrame) -> dict:
 
     return {
         "RSI": (round(rsi, 1) if not pd.isna(rsi) else "N/A", rsi_signal[0], rsi_signal[1]),
-        "MACD": (round(macd, 4), macd_signal[0], macd_signal[1]),
+        "MACD": (macd, macd_signal[0], macd_signal[1]),
         "Trend": (round(price, 2), trend[0], trend[1]),
         "BB": (round(bb_pct * 100, 1) if not pd.isna(bb_pct) else "N/A", bb_pos[0], bb_pos[1]),
     }
@@ -110,11 +180,11 @@ def get_recommendation(signals: dict) -> dict:
     else:
         votes.append(("RSI", "Neutral", "#777"))
 
-    # MACD: bullish = buy (+1), bearish = sell (-1)
+    # MACD: bull labels = buy (+1), bear labels = sell (-1)
     macd_label = signals.get("MACD", ("N/A", "N/A", "gray"))[1]
-    if macd_label == "Bullish":
+    if macd_label in ("Strong Bull", "Bullish"):
         score += 1; votes.append(("MACD", "Buy", "#26a69a"))
-    elif macd_label == "Bearish":
+    elif macd_label in ("Strong Bear", "Bearish"):
         score -= 1; votes.append(("MACD", "Sell", "#ef5350"))
     else:
         votes.append(("MACD", "Neutral", "#777"))

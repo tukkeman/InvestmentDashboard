@@ -9,7 +9,7 @@ from datetime import datetime
 from collections import defaultdict
 
 from data_fetcher import fetch_price_data, fetch_watchlist_summary, fetch_ticker_signal, fetch_ticker_fundamentals
-from technical_analysis import add_all_indicators, get_signals, get_recommendation
+from technical_analysis import add_all_indicators, get_signals, get_recommendation, get_macd_detail
 from news_fetcher import fetch_news, fetch_all_news
 import thai_fund
 import scbam_fetcher
@@ -495,6 +495,7 @@ with tab_analysis:
 
     df = add_all_indicators(df)
     signals = get_signals(df)
+    macd_detail = get_macd_detail(df)
     last = df.iloc[-1]
     prev = df.iloc[-2] if len(df) >= 2 else last
 
@@ -536,6 +537,101 @@ with tab_analysis:
                 <div style="font-size:1.4em;font-weight:700;color:{color}">{val}</div>
                 <div style="font-size:0.8em;color:{color}">{text}</div>
                 </div>""",
+                unsafe_allow_html=True,
+            )
+
+    # ── MACD Breakdown panel ──────────────────────────────────────────────────
+    if macd_detail:
+        st.markdown("**MACD Breakdown**")
+        _mb1, _mb2, _mb3, _mb4 = st.columns(4)
+
+        # 1. Crossover
+        if macd_detail["crossed_up"]:
+            _cx_status, _cx_color = "MACD ตัดขึ้นเหนือ Signal", "#26a69a"
+            _cx_desc = "สัญญาณ Bullish (เพิ่งเกิดขึ้น)"
+        elif macd_detail["crossed_down"]:
+            _cx_status, _cx_color = "MACD ตัดลงต่ำกว่า Signal", "#ef5350"
+            _cx_desc = "สัญญาณ Bearish (เพิ่งเกิดขึ้น)"
+        elif macd_detail["above_signal"]:
+            _cx_status, _cx_color = "MACD อยู่เหนือ Signal", "#26a69a"
+            _cx_desc = "แนวโน้มระยะสั้นแข็งแรง"
+        else:
+            _cx_status, _cx_color = "MACD อยู่ต่ำกว่า Signal", "#ef5350"
+            _cx_desc = "แนวโน้มระยะสั้นอ่อนแอ"
+        with _mb1:
+            st.markdown(
+                f'<div class="fund-metric-mini">'
+                f'<div style="font-size:0.72em;color:#888;margin-bottom:4px">1. MACD vs Signal Line</div>'
+                f'<div style="font-size:0.9em;font-weight:700;color:{_cx_color}">{_cx_status}</div>'
+                f'<div style="font-size:0.78em;color:#aaa;margin-top:3px">{_cx_desc}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+        # 2. Zero line
+        if macd_detail["above_zero"]:
+            _zl_status, _zl_color = f"MACD > 0 (ขาขึ้น)", "#26a69a"
+            _zl_desc = f"EMA สั้น > EMA ยาว · MACD = {macd_detail['macd_value']}"
+        else:
+            _zl_status, _zl_color = f"MACD < 0 (ขาลง)", "#ef5350"
+            _zl_desc = f"EMA สั้น < EMA ยาว · MACD = {macd_detail['macd_value']}"
+        # Combined strength note
+        if macd_detail["above_signal"] and macd_detail["above_zero"]:
+            _zl_desc += " · สัญญาณซื้อแข็งแรง"
+        elif macd_detail["above_signal"] and not macd_detail["above_zero"]:
+            _zl_desc += " · สัญญาณซื้อยังไม่แข็งแรง"
+        with _mb2:
+            st.markdown(
+                f'<div class="fund-metric-mini">'
+                f'<div style="font-size:0.72em;color:#888;margin-bottom:4px">2. ตำแหน่งเทียบเส้นศูนย์</div>'
+                f'<div style="font-size:0.9em;font-weight:700;color:{_zl_color}">{_zl_status}</div>'
+                f'<div style="font-size:0.78em;color:#aaa;margin-top:3px">{_zl_desc}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+        # 3. Histogram momentum
+        _hv = macd_detail["hist_value"]
+        if macd_detail["hist_accelerating"]:
+            _hm_status, _hm_color = "Histogram เพิ่มขึ้น ↑↑", "#26a69a"
+            _hm_desc = f"แรงซื้อเร่งตัวขึ้น · {_hv}"
+        elif macd_detail["hist_increasing"]:
+            _hm_status, _hm_color = "Histogram เพิ่มขึ้น ↑", "#26a69a"
+            _hm_desc = f"แรงซื้อเพิ่มขึ้น · {_hv}"
+        elif macd_detail["hist_decelerating"]:
+            _hm_status, _hm_color = "Histogram ลดลง ↓↓", "#ef5350"
+            _hm_desc = f"โมเมนตัมอ่อนแรงลงเรื่อยๆ · {_hv}"
+        else:
+            _hm_status, _hm_color = "Histogram ลดลง ↓", "#ef5350"
+            _hm_desc = f"โมเมนตัมอ่อนแรง · {_hv}"
+        with _mb3:
+            st.markdown(
+                f'<div class="fund-metric-mini">'
+                f'<div style="font-size:0.72em;color:#888;margin-bottom:4px">3. Histogram</div>'
+                f'<div style="font-size:0.9em;font-weight:700;color:{_hm_color}">{_hm_status}</div>'
+                f'<div style="font-size:0.78em;color:#aaa;margin-top:3px">{_hm_desc}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+        # 4. Divergence
+        _dv = macd_detail["divergence"]
+        if _dv == "bullish":
+            _dv_status, _dv_color = "Bullish Divergence ✓", "#26a69a"
+            _dv_desc = "ราคา Low ใหม่ แต่ MACD ไม่ Low · แรงขายอ่อน"
+        elif _dv == "bearish":
+            _dv_status, _dv_color = "Bearish Divergence ✗", "#ef5350"
+            _dv_desc = "ราคา High ใหม่ แต่ MACD ไม่ High · แรงซื้อหมด"
+        else:
+            _dv_status, _dv_color = "ไม่พบ Divergence", "#888"
+            _dv_desc = "ราคาและ MACD เคลื่อนไหวสอดคล้องกัน"
+        with _mb4:
+            st.markdown(
+                f'<div class="fund-metric-mini">'
+                f'<div style="font-size:0.72em;color:#888;margin-bottom:4px">4. Divergence</div>'
+                f'<div style="font-size:0.9em;font-weight:700;color:{_dv_color}">{_dv_status}</div>'
+                f'<div style="font-size:0.78em;color:#aaa;margin-top:3px">{_dv_desc}</div>'
+                f'</div>',
                 unsafe_allow_html=True,
             )
 
@@ -665,6 +761,7 @@ with tab_analysis:
                    line=dict(color="#ff7043", width=1.5)),
         row=3, col=1,
     )
+    fig.add_hline(y=0, line_dash="dash", line_color="rgba(255,255,255,0.2)", row=3, col=1)
 
     fig.update_layout(
         height=780,
