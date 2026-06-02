@@ -208,55 +208,56 @@ with st.sidebar:
                     st.rerun()
 
     # ── Group management ─────────────────────────────────────────────────────
+    st.divider()
+    st.markdown("### Groups")
+    with st.form("add_group_form", clear_on_submit=True):
+        _gi_col, _gb_col = st.columns([3, 1])
+        with _gi_col:
+            _new_grp = st.text_input(
+                "group_name", placeholder="New group name…", label_visibility="collapsed"
+            )
+        with _gb_col:
+            _grp_submitted = st.form_submit_button("＋", type="primary", use_container_width=True)
+        if _grp_submitted and _new_grp.strip():
+            _gn = _new_grp.strip()
+            if _gn not in st.session_state.group_names:
+                st.session_state.group_names.append(_gn)
+                save_watchlist(st.session_state.tickers)
+                st.rerun()
+
     if st.session_state.group_names:
-        st.caption("Right-click a fund to assign its group.")
-    with st.expander("⚙️ Groups"):
-        with st.form("add_group_form", clear_on_submit=True):
-            _gi_col, _gb_col = st.columns([3, 1])
-            with _gi_col:
-                _new_grp = st.text_input("grp_input", placeholder="New group name…", label_visibility="collapsed")
-            with _gb_col:
-                _grp_submitted = st.form_submit_button("＋", type="primary", use_container_width=True)
-            if _grp_submitted and _new_grp.strip():
-                _gn = _new_grp.strip()
-                if _gn not in st.session_state.group_names:
-                    st.session_state.group_names.append(_gn)
+        st.caption("Drag to reorder · ✕ to delete · right-click fund to assign")
+        _gh = max(len(st.session_state.group_names) * 48 + 12, 50)
+        grp_result = _WL_DND(
+            tickers=st.session_state.group_names,
+            selected="",
+            goto_analysis=False,
+            groups={},
+            group_names=[],
+            default=None,
+            key="groups_dnd",
+            height=_gh,
+        )
+        if grp_result:
+            _gid = grp_result.get("_id")
+            if _gid != st.session_state.grp_dnd_last_id:
+                st.session_state.grp_dnd_last_id = _gid
+                _gaction = grp_result.get("action")
+                _gorder  = grp_result.get("order", st.session_state.group_names)
+                _gname   = grp_result.get("ticker", "")
+                if _gaction == "order" and _gorder != st.session_state.group_names:
+                    st.session_state.group_names = _gorder
                     save_watchlist(st.session_state.tickers)
                     st.rerun()
-
-        if st.session_state.group_names:
-            st.caption("Drag to reorder · ✕ to delete")
-            _gh = max(len(st.session_state.group_names) * 48 + 12, 50)
-            grp_result = _WL_DND(
-                tickers=st.session_state.group_names,
-                selected="",
-                goto_analysis=False,
-                groups={},
-                group_names=[],
-                default=None,
-                key="groups_dnd",
-                height=_gh,
-            )
-            if grp_result:
-                _gid = grp_result.get("_id")
-                if _gid != st.session_state.grp_dnd_last_id:
-                    st.session_state.grp_dnd_last_id = _gid
-                    _gaction = grp_result.get("action")
-                    _gorder  = grp_result.get("order", st.session_state.group_names)
-                    _gname   = grp_result.get("ticker", "")
-                    if _gaction == "order" and _gorder != st.session_state.group_names:
-                        st.session_state.group_names = _gorder
-                        save_watchlist(st.session_state.tickers)
-                        st.rerun()
-                    elif _gaction == "remove" and _gname in st.session_state.group_names:
-                        st.session_state.group_names = [g for g in _gorder if g != _gname]
-                        for _t in list(st.session_state.ticker_groups):
-                            if st.session_state.ticker_groups[_t] == _gname:
-                                del st.session_state.ticker_groups[_t]
-                        save_watchlist(st.session_state.tickers)
-                        st.rerun()
-        else:
-            st.caption("No groups yet.")
+                elif _gaction == "remove" and _gname in st.session_state.group_names:
+                    st.session_state.group_names = [g for g in _gorder if g != _gname]
+                    for _t in list(st.session_state.ticker_groups):
+                        if st.session_state.ticker_groups[_t] == _gname:
+                            del st.session_state.ticker_groups[_t]
+                    save_watchlist(st.session_state.tickers)
+                    st.rerun()
+    else:
+        st.caption("No groups yet.")
 
     st.divider()
     if st.button("🔄 Refresh Data", use_container_width=True):
