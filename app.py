@@ -218,9 +218,13 @@ with st.sidebar:
             )
         with _gb_col:
             _grp_submitted = st.form_submit_button("＋", type="primary", use_container_width=True)
-        if _grp_submitted and _new_grp.strip():
+        if _grp_submitted:
             _gn = _new_grp.strip()
-            if _gn not in st.session_state.group_names:
+            if not _gn:
+                st.error("Type a group name first.")
+            elif _gn in st.session_state.group_names:
+                st.error(f"'{_gn}' already exists.")
+            else:
                 st.session_state.group_names.append(_gn)
                 save_watchlist(st.session_state.tickers)
                 st.rerun()
@@ -282,7 +286,7 @@ ctx_result = _CTX_MENU(
     group_names=st.session_state.group_names,
     key="ctx_menu",
     default=None,
-    height=0,
+    height=1,
 )
 if ctx_result:
     _cid = ctx_result.get("_id")

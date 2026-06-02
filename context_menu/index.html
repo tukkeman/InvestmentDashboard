@@ -112,11 +112,17 @@ function hideMenu() {
 
 function onContextMenu(e) {
     if (!groupNames.length) return;
-    var row = e.target.closest && e.target.closest('[data-testid="stHorizontalBlock"]');
-    if (!row) return;
-    var marker = row.querySelector(".fund-row-marker");
-    if (!marker) return;
-    var ticker = marker.getAttribute("data-ticker");
+    // Walk up from target looking for the nearest ancestor that contains a fund-row-marker.
+    // This is Streamlit-version-agnostic (doesn't rely on stHorizontalBlock testid).
+    var el = e.target;
+    var ticker = null;
+    for (var depth = 0; depth < 20 && el && el.tagName !== 'BODY'; depth++) {
+        if (el.querySelector) {
+            var m = el.querySelector('.fund-row-marker[data-ticker]');
+            if (m) { ticker = m.getAttribute('data-ticker'); break; }
+        }
+        el = el.parentElement;
+    }
     if (!ticker) return;
     e.preventDefault();
     e.stopPropagation();
@@ -129,7 +135,7 @@ function setup() {
     initMenu();
     window.parent.document.removeEventListener("contextmenu", onContextMenu, true);
     window.parent.document.addEventListener("contextmenu", onContextMenu, true);
-    window.parent.postMessage({isStreamlitMessage:true, type:"streamlit:setFrameHeight", height:0}, "*");
+    window.parent.postMessage({isStreamlitMessage:true, type:"streamlit:setFrameHeight", height:1}, "*");
 }
 
 window.addEventListener("message", function(e) {
