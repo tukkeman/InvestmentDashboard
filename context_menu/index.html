@@ -55,7 +55,10 @@ function initMenu() {
         if (currentCallback) currentCallback(group);
         hideMenu();
     });
-    window.parent.document.addEventListener("click", function() { hideMenu(); }, true);
+    window.parent.document.addEventListener("click", function(e) {
+        if (menu && menu.contains(e.target)) return; // click inside menu — let its own handler run first
+        hideMenu();
+    }, true);
     window.parent.document.addEventListener("keydown", function(e) {
         if (e.key === "Escape") hideMenu();
     });
