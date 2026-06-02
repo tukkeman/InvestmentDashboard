@@ -182,9 +182,13 @@ def fetch_ticker_fundamentals(ticker: str) -> dict:
         base['industry'] = info.get('industry', '—') or '—'
         base['long_summary'] = info.get('longBusinessSummary', '') or ''
         base['beta'] = _safe_float(info, 'beta')
-        raw_52w = _safe_float(info, 'fiftyTwoWeekChangePercent') or _safe_float(info, '52WeekChange')
-        if raw_52w is not None:
-            base['change_52w_pct'] = raw_52w * 100 if abs(raw_52w) <= 10 else raw_52w
+        _pct = _safe_float(info, 'fiftyTwoWeekChangePercent')
+        if _pct is not None:
+            base['change_52w_pct'] = _pct               # already in %
+        else:
+            _dec = _safe_float(info, '52WeekChange')
+            if _dec is not None:
+                base['change_52w_pct'] = _dec * 100     # decimal → %
         mktcap = _safe_float(info, 'marketCap')
         if mktcap:
             base['aum_or_mktcap'] = mktcap
@@ -243,11 +247,14 @@ def fetch_ticker_fundamentals(ticker: str) -> dict:
     if info.get("category"):
         base["category"] = info["category"]
 
-    # 52W change
-    raw_52w = _safe_float(info, "fiftyTwoWeekChangePercent") or _safe_float(info, "52WeekChange")
-    if raw_52w is not None:
-        # yfinance returns as decimal fraction (e.g. 0.217 = 21.7%)
-        base["change_52w_pct"] = raw_52w * 100 if abs(raw_52w) <= 10 else raw_52w
+    # 52W change — fiftyTwoWeekChangePercent is already in %; 52WeekChange is a decimal fraction
+    _pct = _safe_float(info, "fiftyTwoWeekChangePercent")
+    if _pct is not None:
+        base["change_52w_pct"] = _pct
+    else:
+        _dec = _safe_float(info, "52WeekChange")
+        if _dec is not None:
+            base["change_52w_pct"] = _dec * 100
 
     # INDEX assets have almost no fundamentals — return early
     if qt == "INDEX":
