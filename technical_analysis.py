@@ -132,14 +132,31 @@ def get_rsi_detail(df: pd.DataFrame) -> dict:
         l50_color = "#ef5350"
 
     # 4. Divergence
-    div_type, _ = detect_rsi_divergence(df)
+    div_type, div_score = detect_rsi_divergence(df)
+
+    # Composite score (range −3 to +3)
+    _s = 0
+    if rsi >= 70:   _s -= 1       # overbought → bearish
+    elif rsi >= 50: _s += 0.5     # bullish territory
+    elif rsi >= 30: _s -= 0.5     # bearish territory
+    else:           _s += 1       # oversold → bullish
+    if trend_dir == "rising":    _s += 0.5
+    elif trend_dir == "falling": _s -= 0.5
+    _s += 0.5 if rsi > 50 else -0.5
+    _s += div_score
+    if   _s >= 1.5:  sig_label, sig_color = "Strong Bull", "#00c853"
+    elif _s >= 0.5:  sig_label, sig_color = "Bullish",     "#26a69a"
+    elif _s >= -0.5: sig_label, sig_color = "Neutral",     "#888888"
+    elif _s >= -1.5: sig_label, sig_color = "Bearish",     "#ef5350"
+    else:            sig_label, sig_color = "Strong Bear",  "#b71c1c"
 
     return {
         "rsi_value": round(rsi, 1),
         "lv_text": lv_text, "lv_color": lv_color,
         "tr_text": tr_text, "tr_color": tr_color, "trend_dir": trend_dir,
         "l50_text": l50_text, "l50_color": l50_color,
-        "divergence": div_type,
+        "divergence": div_type, "div_score": div_score,
+        "score": round(_s, 2), "label": sig_label, "sig_color": sig_color,
     }
 
 
@@ -205,15 +222,13 @@ def get_signals(df: pd.DataFrame) -> dict:
         return {}
     last = df.iloc[-1]
 
-    rsi = last.get("RSI", np.nan)
-    if pd.isna(rsi):
-        rsi_signal = ("N/A", "gray")
-    elif rsi >= 70:
-        rsi_signal = ("Overbought", "#ef5350")
-    elif rsi <= 30:
-        rsi_signal = ("Oversold", "#26a69a")
+    _rd = get_rsi_detail(df)
+    if _rd:
+        rsi = float(_rd["rsi_value"])
+        rsi_signal = (_rd["label"], _rd["sig_color"])
     else:
-        rsi_signal = ("Neutral", "#ffa726")
+        rsi = last.get("RSI", np.nan)
+        rsi_signal = ("N/A", "gray")
 
     _md = get_macd_detail(df)
     if _md:
@@ -260,11 +275,11 @@ def get_recommendation(signals: dict) -> dict:
     score = 0
     votes = []
 
-    # RSI: oversold = buy (+1), overbought = sell (-1)
+    # RSI: bull labels = buy (+1), bear labels = sell (-1)
     rsi_label = signals.get("RSI", ("N/A", "N/A", "gray"))[1]
-    if rsi_label == "Oversold":
+    if rsi_label in ("Strong Bull", "Bullish"):
         score += 1; votes.append(("RSI", "Buy", "#26a69a"))
-    elif rsi_label == "Overbought":
+    elif rsi_label in ("Strong Bear", "Bearish"):
         score -= 1; votes.append(("RSI", "Sell", "#ef5350"))
     else:
         votes.append(("RSI", "Neutral", "#777"))
