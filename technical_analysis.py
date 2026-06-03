@@ -54,6 +54,95 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def detect_rsi_divergence(df: pd.DataFrame, lookback: int = 40) -> tuple:
+    """Detect bullish or bearish RSI divergence in the last `lookback` bars.
+    Returns (type, score): type = 'bullish' | 'bearish' | None, score = +1 | -1 | 0.
+    """
+    if len(df) < lookback + 5 or "RSI" not in df.columns:
+        return None, 0
+    prices = df["Close"].values[-lookback:]
+    rsis   = df["RSI"].values[-lookback:]
+    win = 5
+
+    troughs = [i for i in range(win, len(prices) - win)
+               if prices[i] == min(prices[i - win:i + win + 1])]
+    if len(troughs) >= 2:
+        t1, t2 = troughs[-2], troughs[-1]
+        if prices[t2] < prices[t1] and rsis[t2] > rsis[t1]:
+            return "bullish", 1.0
+
+    peaks = [i for i in range(win, len(prices) - win)
+             if prices[i] == max(prices[i - win:i + win + 1])]
+    if len(peaks) >= 2:
+        p1, p2 = peaks[-2], peaks[-1]
+        if prices[p2] > prices[p1] and rsis[p2] < rsis[p1]:
+            return "bearish", -1.0
+
+    return None, 0
+
+
+def get_rsi_detail(df: pd.DataFrame) -> dict:
+    """Return all 4 RSI components as a flat dict for hover tooltip display."""
+    if len(df) < 5 or "RSI" not in df.columns:
+        return {}
+    rsi_series = df["RSI"].dropna()
+    if len(rsi_series) < 5:
+        return {}
+
+    rsi = float(rsi_series.iloc[-1])
+
+    # 1. Level
+    if rsi >= 70:
+        lv_text, lv_color = f"Overbought (RSI {rsi:.1f}) · มีโอกาสพักตัว", "#ef5350"
+    elif rsi >= 60:
+        lv_text, lv_color = f"RSI {rsi:.1f} · โมเมนตัมขาขึ้นแรง", "#26a69a"
+    elif rsi >= 50:
+        lv_text, lv_color = f"RSI {rsi:.1f} · ขาขึ้นปกติ", "#66bb6a"
+    elif rsi >= 40:
+        lv_text, lv_color = f"RSI {rsi:.1f} · เริ่มอ่อนแรง", "#ffa726"
+    elif rsi >= 30:
+        lv_text, lv_color = f"RSI {rsi:.1f} · ขาลง อ่อนแรงมาก", "#ef9a9a"
+    else:
+        lv_text, lv_color = f"Oversold (RSI {rsi:.1f}) · มีโอกาสรีบาวด์", "#26a69a"
+
+    # 2. Trend (last 5 bars)
+    recent = rsi_series.iloc[-5:].values
+    rises  = sum(1 for i in range(1, len(recent)) if recent[i] > recent[i - 1])
+    falls  = sum(1 for i in range(1, len(recent)) if recent[i] < recent[i - 1])
+    rsi_delta = recent[-1] - recent[0]
+    if rises >= 3:
+        tr_text = f"RSI สูงขึ้นต่อเนื่อง (+{rsi_delta:.1f}) · แรงซื้อเพิ่มขึ้น"
+        tr_color = "#26a69a"
+        trend_dir = "rising"
+    elif falls >= 3:
+        tr_text = f"RSI ลดลงต่อเนื่อง ({rsi_delta:.1f}) · แรงซื้อเริ่มอ่อน"
+        tr_color = "#ef5350"
+        trend_dir = "falling"
+    else:
+        tr_text = "RSI เคลื่อนไหวผสม · ไม่มีทิศทางชัดเจน"
+        tr_color = "#888"
+        trend_dir = "flat"
+
+    # 3. 50 line
+    if rsi > 50:
+        l50_text  = f"RSI > 50 · ฝั่งซื้อได้เปรียบ · แนวโน้มเป็นบวก"
+        l50_color = "#26a69a"
+    else:
+        l50_text  = f"RSI < 50 · ฝั่งขายได้เปรียบ · แนวโน้มเป็นลบ"
+        l50_color = "#ef5350"
+
+    # 4. Divergence
+    div_type, _ = detect_rsi_divergence(df)
+
+    return {
+        "rsi_value": round(rsi, 1),
+        "lv_text": lv_text, "lv_color": lv_color,
+        "tr_text": tr_text, "tr_color": tr_color, "trend_dir": trend_dir,
+        "l50_text": l50_text, "l50_color": l50_color,
+        "divergence": div_type,
+    }
+
+
 def detect_macd_divergence(df: pd.DataFrame, lookback: int = 40) -> tuple:
     """Detect bullish or bearish MACD divergence in the last `lookback` bars.
     Returns (type, score): type = 'bullish' | 'bearish' | None, score = +1 | -1 | 0.

@@ -9,7 +9,7 @@ from datetime import datetime
 from collections import defaultdict
 
 from data_fetcher import fetch_price_data, fetch_watchlist_summary, fetch_ticker_signal, fetch_ticker_fundamentals
-from technical_analysis import add_all_indicators, get_signals, get_recommendation, get_macd_detail
+from technical_analysis import add_all_indicators, get_signals, get_recommendation, get_macd_detail, get_rsi_detail
 from news_fetcher import fetch_news, fetch_all_news
 import thai_fund
 import scbam_fetcher
@@ -514,6 +514,7 @@ with tab_analysis:
     df = add_all_indicators(df)
     signals = get_signals(df)
     macd_detail = get_macd_detail(df)
+    rsi_detail  = get_rsi_detail(df)
     last = df.iloc[-1]
     prev = df.iloc[-2] if len(df) >= 2 else last
 
@@ -549,7 +550,44 @@ with tab_analysis:
     ]
     for col, (label, (val, text, color)) in zip([s1, s2, s3, s4], cards):
         with col:
-            if label == "MACD" and macd_detail:
+            if label == "RSI" and rsi_detail:
+                rd = rsi_detail
+                _dv = rd["divergence"]
+                if _dv == "bullish":
+                    _dvt, _dvc = "Bullish Divergence ✓ · ราคา Low ใหม่ แต่ RSI ไม่ Low", "#26a69a"
+                elif _dv == "bearish":
+                    _dvt, _dvc = "Bearish Divergence ✗ · ราคา High ใหม่ แต่ RSI ไม่ High", "#ef5350"
+                else:
+                    _dvt, _dvc = "ไม่พบ Divergence", "#888"
+
+                def _rtt(num, title, status, sc):
+                    return (
+                        f'<div style="margin-bottom:9px">'
+                        f'<div style="font-size:0.68em;color:#666;margin-bottom:2px">{num}. {title}</div>'
+                        f'<div style="font-size:0.8em;font-weight:600;color:{sc}">{status}</div>'
+                        f'</div>'
+                    )
+                _rsi_tooltip = (
+                    '<div class="macd-tt">'
+                    '<div style="font-size:0.65em;color:#888;font-weight:700;letter-spacing:.08em;margin-bottom:10px;text-transform:uppercase">RSI Analysis</div>'
+                    + _rtt("1", "ระดับ RSI", rd["lv_text"], rd["lv_color"])
+                    + _rtt("2", "แนวโน้ม RSI", rd["tr_text"], rd["tr_color"])
+                    + _rtt("3", "เส้น 50", rd["l50_text"], rd["l50_color"])
+                    + _rtt("4", "Divergence", _dvt, _dvc)
+                    + '</div>'
+                )
+                st.markdown(
+                    f'<div class="macd-wrapper">'
+                    f'<div class="metric-card" style="border-color:{color};cursor:help">'
+                    f'<div style="font-size:0.75em;color:#888">RSI <span style="font-size:0.8em;color:#555">ⓘ</span></div>'
+                    f'<div style="font-size:1.4em;font-weight:700;color:{color}">{val}</div>'
+                    f'<div style="font-size:0.8em;color:{color}">{text}</div>'
+                    f'</div>'
+                    f'{_rsi_tooltip}'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+            elif label == "MACD" and macd_detail:
                 # Build hover tooltip content from 4 MACD methods
                 if macd_detail["crossed_up"]:
                     _cx, _cxc = "MACD ตัดขึ้นเหนือ Signal (เพิ่งเกิด)", "#26a69a"
