@@ -9,7 +9,7 @@ from datetime import datetime
 from collections import defaultdict
 
 from data_fetcher import fetch_price_data, fetch_watchlist_summary, fetch_ticker_signal, fetch_ticker_fundamentals
-from technical_analysis import add_all_indicators, get_signals, get_recommendation, get_macd_detail, get_rsi_detail, get_trend_detail
+from technical_analysis import add_all_indicators, get_signals, get_recommendation, get_macd_detail, get_rsi_detail, get_trend_detail, get_bb_detail
 from news_fetcher import fetch_news, fetch_all_news
 import thai_fund
 import scbam_fetcher
@@ -516,6 +516,7 @@ with tab_analysis:
     macd_detail  = get_macd_detail(df)
     rsi_detail   = get_rsi_detail(df)
     trend_detail = get_trend_detail(df)
+    bb_detail    = get_bb_detail(df)
     last = df.iloc[-1]
     prev = df.iloc[-2] if len(df) >= 2 else last
 
@@ -677,6 +678,35 @@ with tab_analysis:
                     f'<div style="font-size:0.8em;color:{color}">{text}</div>'
                     f'</div>'
                     f'{_trend_tooltip}'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+            elif label == "Bollinger %" and bb_detail:
+                bd = bb_detail
+                def _bbt(num, title, status, sc):
+                    return (
+                        f'<div style="margin-bottom:9px">'
+                        f'<div style="font-size:0.68em;color:#666;margin-bottom:2px">{num}. {title}</div>'
+                        f'<div style="font-size:0.8em;font-weight:600;color:{sc}">{status}</div>'
+                        f'</div>'
+                    )
+                _bb_tooltip = (
+                    '<div class="macd-tt">'
+                    '<div style="font-size:0.65em;color:#888;font-weight:700;letter-spacing:.08em;margin-bottom:10px;text-transform:uppercase">Bollinger Band Analysis</div>'
+                    + _bbt("1", "Band Width / Squeeze", bd["bw_text"],   bd["bw_color"])
+                    + _bbt("2", "ตำแหน่งราคาใน Band",   bd["zone_text"], bd["zone_color"])
+                    + _bbt("3", "Band Walk",              bd["walk_text"], bd["walk_color"])
+                    + _bbt("4", "Breakout / Mean Reversion", bd["ass_text"], bd["ass_color"])
+                    + '</div>'
+                )
+                st.markdown(
+                    f'<div class="macd-wrapper">'
+                    f'<div class="metric-card" style="border-color:{color};cursor:help">'
+                    f'<div style="font-size:0.75em;color:#888">Bollinger % <span style="font-size:0.8em;color:#555">ⓘ</span></div>'
+                    f'<div style="font-size:1.4em;font-weight:700;color:{color}">{val}</div>'
+                    f'<div style="font-size:0.8em;color:{color}">{text}</div>'
+                    f'</div>'
+                    f'{_bb_tooltip}'
                     f'</div>',
                     unsafe_allow_html=True,
                 )

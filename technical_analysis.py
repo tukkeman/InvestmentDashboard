@@ -320,6 +320,141 @@ def get_trend_detail(df: pd.DataFrame) -> dict:
     }
 
 
+def get_bb_detail(df: pd.DataFrame) -> dict:
+    """Return 4-component Bollinger Band analysis dict for hover tooltip and signal scoring."""
+    required = ["BB_Upper", "BB_Lower", "BB_Mid", "BB_Pct", "Close"]
+    if len(df) < 20 or not all(c in df.columns for c in required):
+        return {}
+    bp_series = df["BB_Pct"].dropna()
+    if len(bp_series) < 5:
+        return {}
+
+    last   = df.iloc[-1]
+    upper  = float(last["BB_Upper"]); lower = float(last["BB_Lower"])
+    mid    = float(last["BB_Mid"]);   bb_pct = float(last["BB_Pct"])
+
+    # Band width as % of midline
+    width_now = (upper - lower) / mid * 100 if mid else 0
+    n_hist    = min(len(df) - 1, 20)
+    _bw = ((df["BB_Upper"].iloc[-(n_hist+1):-1] - df["BB_Lower"].iloc[-(n_hist+1):-1])
+           / df["BB_Mid"].iloc[-(n_hist+1):-1] * 100).dropna()
+    width_avg = float(_bw.mean()) if len(_bw) > 0 else width_now
+    width_std = float(_bw.std())  if len(_bw) > 1 else 0
+
+    # RSI for mean-reversion check
+    rsi_val = None
+    if "RSI" in df.columns:
+        _r = df["RSI"].dropna()
+        if len(_r) >= 1:
+            rsi_val = float(_r.iloc[-1])
+
+    # ── 1. Band Width / Squeeze ──────────────────────────────────────────────
+    is_squeeze     = (width_std > 0) and (width_now < width_avg - width_std)
+    width_chg_pct  = (width_now - width_avg) / width_avg * 100 if width_avg else 0
+
+    if is_squeeze:
+        bw_text  = f"Squeeze · Band แคบมาก ({width_now:.1f}% vs avg {width_avg:.1f}%) · สะสมพลัง รอ Breakout"
+        bw_color = "#ffa726"; bw_score = 0; bw_state = "squeeze"
+    elif width_chg_pct > 15:
+        bw_text  = f"Band ขยาย (+{width_chg_pct:.0f}%) · ความผันผวนเพิ่ม · กำลังเกิด Trend"
+        bw_color = "#26a69a" if bb_pct >= 0.5 else "#ef5350"
+        bw_score = 0.5 if bb_pct >= 0.5 else -0.5; bw_state = "expanding"
+    elif width_chg_pct < -15:
+        bw_text  = f"Band หด ({width_chg_pct:.0f}%) · ความผันผวนลด · ตลาดพักฐาน"
+        bw_color = "#888"; bw_score = 0; bw_state = "contracting"
+    else:
+        bw_text  = f"Band ทรงตัว ({width_chg_pct:+.0f}%) · ความผันผวนปกติ"
+        bw_color = "#888"; bw_score = 0; bw_state = "normal"
+
+    # ── 2. Price Zone ────────────────────────────────────────────────────────
+    bp_disp = round(bb_pct * 100, 1)
+    if bb_pct > 1.0:
+        zone_text  = f"เหนือ Upper Band (BB% {bp_disp:.0f}%) · ราคาทะลุขึ้น · Breakout"
+        zone_color = "#26a69a"; zone_score = 0.5; zone = "above_upper"
+    elif bb_pct >= 0.8:
+        zone_text  = f"โซนบน (BB% {bp_disp}%) · ใกล้ Upper Band · แรงซื้อเด่น · Momentum บวก"
+        zone_color = "#26a69a"; zone_score = 0.5; zone = "upper"
+    elif bb_pct >= 0.5:
+        zone_text  = f"ครึ่งบน (BB% {bp_disp}%) · เหนือ Middle Band · ฝั่งซื้อได้เปรียบ"
+        zone_color = "#66bb6a"; zone_score = 0.25; zone = "mid_upper"
+    elif bb_pct >= 0.2:
+        zone_text  = f"ครึ่งล่าง (BB% {bp_disp}%) · ต่ำกว่า Middle Band · ฝั่งขายได้เปรียบ"
+        zone_color = "#ffa726"; zone_score = -0.25; zone = "mid_lower"
+    elif bb_pct >= 0.0:
+        zone_text  = f"โซนล่าง (BB% {bp_disp}%) · ใกล้ Lower Band · แรงขายเด่น · Momentum ลบ"
+        zone_color = "#ef5350"; zone_score = -0.5; zone = "lower"
+    else:
+        zone_text  = f"ต่ำกว่า Lower Band (BB% {bp_disp:.0f}%) · ราคาทะลุลง · Breakdown"
+        zone_color = "#ef5350"; zone_score = -0.5; zone = "below_lower"
+
+    # ── 3. Band Walk (last 5 bars) ───────────────────────────────────────────
+    recent_pct      = bp_series.iloc[-5:].values
+    near_upper_cnt  = sum(1 for p in recent_pct if p >= 0.7)
+    near_lower_cnt  = sum(1 for p in recent_pct if p <= 0.3)
+
+    if near_upper_cnt >= 3:
+        walk_text  = f"Bullish Band Walk · เกาะ Upper Band {near_upper_cnt}/5 แท่ง · Uptrend แข็งแรงมาก"
+        walk_color = "#26a69a"; walk_score = 1; walk_state = "bullish"
+    elif near_lower_cnt >= 3:
+        walk_text  = f"Bearish Band Walk · เกาะ Lower Band {near_lower_cnt}/5 แท่ง · Downtrend แข็งแรง"
+        walk_color = "#ef5350"; walk_score = -1; walk_state = "bearish"
+    else:
+        walk_text  = "ไม่มี Band Walk · ราคาเคลื่อนไหวภายใน Band ปกติ"
+        walk_color = "#888"; walk_score = 0; walk_state = "none"
+
+    # ── 4. Breakout / Mean Reversion Assessment ──────────────────────────────
+    mean_rev_risk = (bb_pct > 0.85 and bw_state == "contracting"
+                     and (rsi_val is None or rsi_val > 75))
+
+    if bb_pct > 1.0:
+        if bw_state == "expanding":
+            ass_text  = "Breakout แข็งแรง · Band ขยาย · โอกาสเริ่ม Trend ใหม่"
+            ass_color = "#26a69a"; ass_score = 0.5
+        else:
+            ass_text  = "ระวัง Breakout หลอก · Band ไม่ขยาย · อาจกลับเข้า Band"
+            ass_color = "#ffa726"; ass_score = -0.25
+    elif bb_pct < 0.0:
+        if bw_state == "expanding":
+            ass_text  = "Breakdown แข็งแรง · Band ขยาย · โอกาสขาลงต่อ"
+            ass_color = "#ef5350"; ass_score = -0.5
+        else:
+            ass_text  = "ระวัง Breakdown หลอก · Band ไม่ขยาย · อาจรีบาวด์"
+            ass_color = "#ffa726"; ass_score = 0.25
+    elif is_squeeze:
+        ass_text  = "Squeeze · รอทิศทาง Breakout · ยังไม่ชัดเจน"
+        ass_color = "#ffa726"; ass_score = 0
+    elif mean_rev_risk:
+        _r_str = f" (RSI {rsi_val:.0f})" if rsi_val else ""
+        ass_text  = f"Mean Reversion เสี่ยง · ราคาสูง+Band หด{_r_str} · อาจย่อกลับ SMA20"
+        ass_color = "#ffa726"; ass_score = -0.25
+    elif walk_state == "bullish" and bw_state == "expanding":
+        ass_text  = "Bullish Momentum ต่อเนื่อง · Band Walk+Band ขยาย · แรงซื้อแข็งแรง"
+        ass_color = "#26a69a"; ass_score = 0.5
+    elif walk_state == "bearish" and bw_state == "expanding":
+        ass_text  = "Bearish Momentum ต่อเนื่อง · Band Walk+Band ขยาย · แรงขายแข็งแรง"
+        ass_color = "#ef5350"; ass_score = -0.5
+    else:
+        ass_text  = "ไม่มีสัญญาณ Breakout ชัดเจน · เคลื่อนไหวปกติภายใน Band"
+        ass_color = "#888"; ass_score = 0
+
+    # Composite score (range approximately −3 to +3)
+    _s = bw_score + zone_score + walk_score + ass_score
+    if   _s >= 1.5:  sig_label, sig_color = "Strong Bull", "#00c853"
+    elif _s >= 0.5:  sig_label, sig_color = "Bullish",     "#26a69a"
+    elif _s >= -0.5: sig_label, sig_color = "Neutral",     "#888888"
+    elif _s >= -1.5: sig_label, sig_color = "Bearish",     "#ef5350"
+    else:            sig_label, sig_color = "Strong Bear",  "#b71c1c"
+
+    return {
+        "bb_pct": bp_disp, "upper": round(upper, 4), "mid": round(mid, 4), "lower": round(lower, 4),
+        "bw_state": bw_state, "bw_text": bw_text, "bw_color": bw_color,
+        "zone": zone,         "zone_text": zone_text, "zone_color": zone_color,
+        "walk_state": walk_state, "walk_text": walk_text, "walk_color": walk_color,
+        "ass_text": ass_text, "ass_color": ass_color,
+        "score": round(_s, 2), "label": sig_label, "sig_color": sig_color,
+    }
+
+
 def get_signals(df: pd.DataFrame) -> dict:
     if df.empty:
         return {}
@@ -359,7 +494,10 @@ def get_signals(df: pd.DataFrame) -> dict:
         trend = ("Uptrend", "#26a69a") if (not pd.isna(sma20) and price > sma20) else ("Downtrend", "#ef5350")
 
     bb_pct = last.get("BB_Pct", 0.5)
-    if pd.isna(bb_pct):
+    _bd = get_bb_detail(df)
+    if _bd:
+        bb_pos = (_bd["label"], _bd["sig_color"])
+    elif pd.isna(bb_pct):
         bb_pos = ("N/A", "gray")
     elif bb_pct >= 0.9:
         bb_pos = ("Near Upper", "#ef5350")
@@ -408,11 +546,11 @@ def get_recommendation(signals: dict) -> dict:
     else:
         votes.append(("SMA Trend", "Neutral", "#777"))
 
-    # Bollinger Bands: near lower = buy (+1), near upper = sell (-1)
+    # Bollinger Bands: bull labels = buy (+1), bear labels = sell (-1)
     bb_label = signals.get("BB", ("N/A", "N/A", "gray"))[1]
-    if bb_label == "Near Lower":
+    if bb_label in ("Strong Bull", "Bullish"):
         score += 1; votes.append(("Bollinger", "Buy", "#26a69a"))
-    elif bb_label == "Near Upper":
+    elif bb_label in ("Strong Bear", "Bearish"):
         score -= 1; votes.append(("Bollinger", "Sell", "#ef5350"))
     else:
         votes.append(("Bollinger", "Neutral", "#777"))
