@@ -6,4 +6,3 @@ plotly>=5.20.0
 requests>=2.31.0
 feedparser>=6.0.11
 pyarrow>=17.0.0
-thaifin>=1.1.0
