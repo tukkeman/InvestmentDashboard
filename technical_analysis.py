@@ -217,6 +217,109 @@ def get_macd_detail(df: pd.DataFrame) -> dict:
     }
 
 
+def get_trend_detail(df: pd.DataFrame) -> dict:
+    """Return 4-component Trend vs SMA20 analysis dict for hover tooltip and signal scoring."""
+    if len(df) < 20 or "SMA_20" not in df.columns:
+        return {}
+    sma20_series = df["SMA_20"].dropna()
+    if len(sma20_series) < 11:
+        return {}
+
+    last = df.iloc[-1]
+    price  = float(last["Close"])
+    sma20  = float(last["SMA_20"])
+
+    # 1. SMA20 slope — compare now vs 10 bars ago
+    sma20_10ago = float(sma20_series.iloc[-11])
+    slope_pct = (sma20 - sma20_10ago) / sma20_10ago * 100 if sma20_10ago else 0.0
+    if slope_pct > 0.3:
+        slope_text  = f"SMA20 ชันขึ้น (+{slope_pct:.2f}%) · แนวโน้มขาขึ้น · มองหาจังหวะซื้อ"
+        slope_color = "#26a69a"; slope_dir = "rising";  slope_score = 1
+    elif slope_pct < -0.3:
+        slope_text  = f"SMA20 ชันลง ({slope_pct:.2f}%) · แนวโน้มขาลง · ระวังการซื้อสวนเทรนด์"
+        slope_color = "#ef5350"; slope_dir = "falling"; slope_score = -1
+    else:
+        slope_text  = f"SMA20 แบน ({slope_pct:+.2f}%) · Sideway · สัญญาณอาจหลอก"
+        slope_color = "#ffa726"; slope_dir = "flat";    slope_score = 0
+
+    # 2. Price position vs SMA20
+    dist_pct    = (price - sma20) / sma20 * 100 if sma20 else 0.0
+    above_sma20 = price > sma20
+    if above_sma20:
+        pos_text  = f"ราคาอยู่เหนือ SMA20 (+{dist_pct:.1f}%) · ฝั่งซื้อยังคุมเกม · แนวโน้มยังแข็งแรง"
+        pos_color = "#26a69a"; pos_score = 0.5
+    else:
+        pos_text  = f"ราคาอยู่ต่ำกว่า SMA20 ({dist_pct:.1f}%) · ฝั่งขายเริ่มได้เปรียบ"
+        pos_color = "#ef5350"; pos_score = -0.5
+
+    # 3. Pullback to SMA20 — check if price recently touched within 2% of SMA20
+    recent_touch = False
+    for i in range(-5, -1):
+        try:
+            _p = float(df["Close"].iloc[i]); _s = float(df["SMA_20"].iloc[i])
+            if _s and abs((_p - _s) / _s * 100) < 2.0:
+                recent_touch = True; break
+        except Exception:
+            pass
+
+    dist_abs = abs(dist_pct)
+    if slope_dir == "rising" and dist_abs < 2.0 and above_sma20:
+        pb_text  = f"Pullback zone · ราคาใกล้ SMA20 ({dist_pct:+.1f}%) · จังหวะเข้าซื้อ Low Risk"
+        pb_color = "#26a69a"; pb_score = 1
+    elif slope_dir == "rising" and recent_touch and above_sma20:
+        pb_text  = "เพิ่งเด้งจาก SMA20 · ยืนยันแนวรับ · สัญญาณซื้อที่ดี"
+        pb_color = "#26a69a"; pb_score = 1
+    elif slope_dir == "rising" and dist_pct > 5:
+        pb_text  = f"ราคาวิ่งเร็วเกิน SMA20 (+{dist_pct:.1f}%) · มีโอกาสพักฐาน · รอย่อตัวก่อนเข้า"
+        pb_color = "#ffa726"; pb_score = 0
+    elif slope_dir == "rising":
+        pb_text  = f"ห่าง SMA20 ปานกลาง (+{dist_pct:.1f}%) · รอดูการย่อตัว"
+        pb_color = "#888";    pb_score = 0
+    elif slope_dir == "flat":
+        pb_text  = "SMA20 แบน · จังหวะ Pullback ไม่ชัดเจน"
+        pb_color = "#888";    pb_score = 0
+    elif not above_sma20:
+        pb_text  = f"ราคาต่ำกว่า SMA20 ({dist_pct:.1f}%) · ยังไม่มีจังหวะ Pullback"
+        pb_color = "#ef5350"; pb_score = -0.5
+    else:
+        pb_text  = "SMA20 ชันลง · ระวังการซื้อสวนเทรนด์"
+        pb_color = "#ef5350"; pb_score = -0.5
+
+    # 4. Distance from SMA20
+    if above_sma20:
+        if dist_pct > 5:
+            dist_text  = f"ห่าง SMA20 มาก (+{dist_pct:.1f}%) · วิ่งเร็วเกิน · อาจพักหรือแกว่งออกข้าง"
+            dist_color = "#ffa726"; dist_score = -0.5
+        else:
+            dist_text  = f"ราคาเกาะ SMA20 (+{dist_pct:.1f}%) · แนวโน้มขึ้นต่อเนื่อง"
+            dist_color = "#26a69a"; dist_score = 0.5
+    else:
+        if dist_pct < -5:
+            dist_text  = f"ราคาต่ำกว่า SMA20 มาก ({dist_pct:.1f}%) · แนวโน้มอ่อนแอ"
+            dist_color = "#ef5350"; dist_score = -1
+        else:
+            dist_text  = f"ราคาต่ำกว่า SMA20 ({dist_pct:.1f}%) · SMA20 กลายเป็นแนวต้าน"
+            dist_color = "#ef5350"; dist_score = -0.5
+
+    # Composite score (range −3 to +3)
+    _s = slope_score + pos_score + pb_score + dist_score
+    if   _s >= 1.5:  sig_label, sig_color = "Strong Bull", "#00c853"
+    elif _s >= 0.5:  sig_label, sig_color = "Bullish",     "#26a69a"
+    elif _s >= -0.5: sig_label, sig_color = "Neutral",     "#888888"
+    elif _s >= -1.5: sig_label, sig_color = "Bearish",     "#ef5350"
+    else:            sig_label, sig_color = "Strong Bear",  "#b71c1c"
+
+    return {
+        "price": round(price, 4), "sma20": round(sma20, 4), "dist_pct": round(dist_pct, 2),
+        "above_sma20": above_sma20, "slope_dir": slope_dir,
+        "slope_text": slope_text, "slope_color": slope_color,
+        "pos_text":   pos_text,   "pos_color":   pos_color,
+        "pb_text":    pb_text,    "pb_color":    pb_color,
+        "dist_text":  dist_text,  "dist_color":  dist_color,
+        "score": round(_s, 2), "label": sig_label, "sig_color": sig_color,
+    }
+
+
 def get_signals(df: pd.DataFrame) -> dict:
     if df.empty:
         return {}
@@ -249,8 +352,11 @@ def get_signals(df: pd.DataFrame) -> dict:
 
     price = last.get("Close", 0)
     sma20 = last.get("SMA_20", np.nan)
-    sma50 = last.get("SMA_50", np.nan)
-    trend = ("Uptrend", "#26a69a") if (not pd.isna(sma20) and price > sma20) else ("Downtrend", "#ef5350")
+    _td = get_trend_detail(df)
+    if _td:
+        trend = (_td["label"], _td["sig_color"])
+    else:
+        trend = ("Uptrend", "#26a69a") if (not pd.isna(sma20) and price > sma20) else ("Downtrend", "#ef5350")
 
     bb_pct = last.get("BB_Pct", 0.5)
     if pd.isna(bb_pct):
@@ -293,11 +399,11 @@ def get_recommendation(signals: dict) -> dict:
     else:
         votes.append(("MACD", "Neutral", "#777"))
 
-    # SMA Trend: uptrend = buy (+1), downtrend = sell (-1)
+    # SMA Trend: bull labels = buy (+1), bear labels = sell (-1)
     trend_label = signals.get("Trend", ("N/A", "N/A", "gray"))[1]
-    if trend_label == "Uptrend":
+    if trend_label in ("Strong Bull", "Bullish"):
         score += 1; votes.append(("SMA Trend", "Buy", "#26a69a"))
-    elif trend_label == "Downtrend":
+    elif trend_label in ("Strong Bear", "Bearish"):
         score -= 1; votes.append(("SMA Trend", "Sell", "#ef5350"))
     else:
         votes.append(("SMA Trend", "Neutral", "#777"))

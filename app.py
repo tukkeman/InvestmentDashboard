@@ -9,7 +9,7 @@ from datetime import datetime
 from collections import defaultdict
 
 from data_fetcher import fetch_price_data, fetch_watchlist_summary, fetch_ticker_signal, fetch_ticker_fundamentals
-from technical_analysis import add_all_indicators, get_signals, get_recommendation, get_macd_detail, get_rsi_detail
+from technical_analysis import add_all_indicators, get_signals, get_recommendation, get_macd_detail, get_rsi_detail, get_trend_detail
 from news_fetcher import fetch_news, fetch_all_news
 import thai_fund
 import scbam_fetcher
@@ -513,8 +513,9 @@ with tab_analysis:
 
     df = add_all_indicators(df)
     signals = get_signals(df)
-    macd_detail = get_macd_detail(df)
-    rsi_detail  = get_rsi_detail(df)
+    macd_detail  = get_macd_detail(df)
+    rsi_detail   = get_rsi_detail(df)
+    trend_detail = get_trend_detail(df)
     last = df.iloc[-1]
     prev = df.iloc[-2] if len(df) >= 2 else last
 
@@ -647,6 +648,35 @@ with tab_analysis:
                     f'<div style="font-size:0.8em;color:{color}">{text}</div>'
                     f'</div>'
                     f'{_tooltip}'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+            elif label == "Trend vs SMA20" and trend_detail:
+                td = trend_detail
+                def _ttt(num, title, status, sc):
+                    return (
+                        f'<div style="margin-bottom:9px">'
+                        f'<div style="font-size:0.68em;color:#666;margin-bottom:2px">{num}. {title}</div>'
+                        f'<div style="font-size:0.8em;font-weight:600;color:{sc}">{status}</div>'
+                        f'</div>'
+                    )
+                _trend_tooltip = (
+                    '<div class="macd-tt">'
+                    '<div style="font-size:0.65em;color:#888;font-weight:700;letter-spacing:.08em;margin-bottom:10px;text-transform:uppercase">Trend vs SMA20 Analysis</div>'
+                    + _ttt("1", "ความชัน SMA20", td["slope_text"], td["slope_color"])
+                    + _ttt("2", "ตำแหน่งราคา vs SMA20", td["pos_text"], td["pos_color"])
+                    + _ttt("3", "Pullback to SMA20", td["pb_text"], td["pb_color"])
+                    + _ttt("4", "ระยะห่างจาก SMA20", td["dist_text"], td["dist_color"])
+                    + '</div>'
+                )
+                st.markdown(
+                    f'<div class="macd-wrapper">'
+                    f'<div class="metric-card" style="border-color:{color};cursor:help">'
+                    f'<div style="font-size:0.75em;color:#888">Trend vs SMA20 <span style="font-size:0.8em;color:#555">ⓘ</span></div>'
+                    f'<div style="font-size:1.4em;font-weight:700;color:{color}">{val}</div>'
+                    f'<div style="font-size:0.8em;color:{color}">{text}</div>'
+                    f'</div>'
+                    f'{_trend_tooltip}'
                     f'</div>',
                     unsafe_allow_html=True,
                 )
