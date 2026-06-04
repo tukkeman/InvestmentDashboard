@@ -77,8 +77,8 @@ def fetch_ticker_summary(ticker: str) -> dict:
 @st.cache_data(ttl=300)
 def fetch_ticker_signal(ticker: str) -> dict:
     """Return overall TA signal for a ticker (label, color, score)."""
-    df = fetch_price_data(ticker, "3mo")
-    if df.empty or len(df) < 26:
+    df = fetch_price_data(ticker, "1mo")
+    if df.empty or len(df) < 20:
         return {"label": "N/A", "color": "#888", "score": 0}
     df = add_all_indicators(df)
     signals = get_signals(df)

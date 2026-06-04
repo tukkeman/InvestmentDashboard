@@ -489,7 +489,7 @@ with tab_analysis:
     with col_period:
         period = st.selectbox(
             "Period", ["1mo", "3mo", "6mo", "1y", "2y", "5y"],
-            index=1, label_visibility="collapsed"
+            index=0, label_visibility="collapsed"
         )
 
     # ── Auto-fetch SCBAM NAV if needed (no user interaction required) ────────
